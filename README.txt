@@ -1,4 +1,4 @@
-This is my progres on the vulkan indirect meshlet renderer exercice on Sunday 3, (after roughly 1 week and 2 days from the start)
+This is my progres on the vulkan indirect meshlet renderer
 
 Acheived:
 Base vulkan engine

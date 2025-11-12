@@ -1,0 +1,60 @@
+#version 460
+#extension GL_EXT_mesh_shader : require
+
+struct Meshlet
+{
+	uint vertexOffset;
+	uint triangleOffset;
+	uint vertexCount;
+	uint triangleCount;
+};
+struct TaskInfo
+{
+	Meshlet meshlet;
+	uint meshletID;
+	uint meshID;
+};
+struct CullingInfo
+{
+	//normal cone, useful for backface culling
+	vec3 coneApex;
+	float coneCutoff; // = cos(angle/2)
+	vec3 coneAxis;
+};
+
+layout(binding = 0) readonly buffer Meshlets { Meshlet meshlets[]; };
+layout(std430, binding = 7) readonly buffer CullInfoBuffer { CullingInfo meshletCullInfos[]; };
+layout(std430, binding = 6) readonly buffer ModelIDs { uint modelIDs[]; };
+layout(std140, binding = 4) uniform transformations
+{
+	mat4 viewProj;
+    vec3 cameraPos;
+};
+taskPayloadSharedEXT TaskInfo meshletIn;
+
+layout(local_size_x_id = 1) in;
+//layout(local_size_x = 1) in;
+layout(local_size_y = 1, local_size_z = 1) in;
+void main()
+{
+	//Meshlet level culling
+	//for (uint i = gl_LocalInvocationIndex; i < meshlet.vertexCount; i += gl_WorkGroupSize.x)
+	//{
+	//	
+	//}
+	//if (gl_LocalInvocationID.x == 0)
+	//{
+	//	meshletIn.meshlet = meshlets[gl_WorkGroupID.x];
+	//	meshletIn.meshletID = gl_WorkGroupID.x;
+	//	EmitMeshTasksEXT(gl_NumWorkGroups.x, 1, 1);
+	//}
+	CullingInfo cInfo = meshletCullInfos[gl_WorkGroupID.x];
+	//if (dot(normalize((models[gl_DrawID] * vec4(cInfo.coneApex, 1.0f)).xyz - cameraPos), (models[gl_DrawID] * vec4(cInfo.coneAxis, 1.0f)).xyz) < cInfo.coneCutoff)
+	//if (dot(normalize(cInfo.coneApex - cameraPos), cInfo.coneAxis) < cInfo.coneCutoff)
+	//{
+		meshletIn.meshlet = meshlets[gl_WorkGroupID.x];
+		meshletIn.meshletID = gl_WorkGroupID.x;
+		meshletIn.meshID = modelIDs[gl_DrawID];
+		EmitMeshTasksEXT(1, 1, 1);
+	//}
+}

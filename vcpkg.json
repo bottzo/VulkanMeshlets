@@ -1,0 +1,14 @@
+{
+  "dependencies": [
+    "meshoptimizer",
+    {
+      "name": "sdl3",
+      "features": [
+        "vulkan"
+      ]
+    },
+    "tinygltf",
+    "vulkan",
+    "glm"
+  ]
+}

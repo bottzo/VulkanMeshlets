@@ -1,0 +1,59 @@
+#version 460
+
+struct Box
+{
+	vec3 points[8];
+};
+struct Command
+{
+	uint dispatchThreadsX;	// Number of mesh meshlets
+	uint dispatchThreadsY;  // 1
+	uint dispatchThreadsZ;  // 1
+};
+layout(std430, binding = 4) readonly buffer OBBS
+{
+	Box OBBs[];
+};
+layout(std430, binding = 5) readonly buffer Transforms
+{
+	mat4 models[];
+};
+layout(std430, binding = 1) readonly buffer ReadCommands { uint inMeshMeshlets[]; };
+layout(std430, binding = 2) writeonly buffer WriteCommands { Command outCommands[]; };
+layout(std430, binding = 3) writeonly buffer ParameterBuffer { int numOutCommands; };
+layout(std430, binding = 6) writeonly buffer ModelIDs { uint modelIDs[]; };
+layout(binding = 0) uniform uboData 
+{
+	vec4 frustumPlanes[6];
+	uint numCommands;
+};
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+void main()
+{
+	if(gl_GlobalInvocationID.x < numCommands) 
+    {
+		Box obb;
+		for(uint i = 0; i<8; ++i)
+		{
+			obb.points[i] =  (models[gl_GlobalInvocationID.x] * vec4(OBBs[gl_GlobalInvocationID.x].points[i], 1.0)).xyz;
+		}
+		for(uint i = 0; i<6; ++i)
+		{
+			uint outPoint = 0;
+			vec4 currPlane = frustumPlanes[i];
+			for(uint k = 0; k<8; ++k)
+			{
+				if((dot(currPlane.xyz, obb.points[k]) - currPlane.w) >= 0.0)
+					++outPoint;
+			}
+			if(outPoint == 8)
+				return;
+		}
+		uint outIdx = atomicAdd(numOutCommands, 1);
+		outCommands[outIdx].dispatchThreadsX = inMeshMeshlets[gl_GlobalInvocationID.x];
+		outCommands[outIdx].dispatchThreadsY = 1;
+		outCommands[outIdx].dispatchThreadsZ = 1;
+		modelIDs[outIdx] = gl_GlobalInvocationID.x;
+	}
+}

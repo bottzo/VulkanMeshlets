@@ -1,0 +1,89 @@
+#version 460
+#extension GL_EXT_mesh_shader : require
+
+layout(local_size_x_id = 0) in; 
+layout(local_size_y = 1, local_size_z = 1) in;
+//TODO: How do I set the right max vertices and max primitives if i get the value at runtime
+//layout(triangles) out;
+//layout (constant_id = 1) const int MAX_VERTICES = 256;
+//layout (constant_id = 2) const int MAX_PRIMITIVES = 256;
+//layout(max_vertices = MAX_VERTICES, max_primitives = MAX_PRIMITIVES) out;
+layout(triangles, max_vertices = 256, max_primitives = 256) out;
+
+//buildin vertex and primitive outputs
+//out uint  gl_PrimitivePointIndicesEXT[];
+//out uvec2 gl_PrimitiveLineIndicesEXT[];
+//out uvec3 gl_PrimitiveTriangleIndicesEXT[];
+//out gl_MeshPerVertexEXT {
+//  vec4  gl_Position;
+//  float gl_PointSize;
+//  float gl_ClipDistance[];
+//  float gl_CullDistance[];
+//} gl_MeshVerticesEXT[];
+//
+//perprimitiveEXT out gl_MeshPerPrimitiveEXT {
+//  int  gl_PrimitiveID;
+//  int  gl_Layer;
+//  int  gl_ViewportIndex;
+//  bool gl_CullPrimitiveEXT;
+//  int  gl_PrimitiveShadingRateEXT;
+//} gl_MeshPrimitivesEXT[];
+
+layout(std430, binding = 5) readonly buffer Transforms 
+{
+	mat4 models[];
+};
+layout(binding = 1) readonly buffer MeshletVertices { uint meshletVertices[]; };
+//could be byte array
+layout(binding = 2) readonly buffer MeshletTriangles { uint meshletTriangles[]; };
+
+struct Vertex
+{
+    vec3 position;
+    vec3 normal;
+};
+layout(binding = 3) readonly buffer vertices { Vertex vertexBuffer[]; };
+
+//layout( push_constant )
+layout(std140, binding = 4) uniform transformations
+{
+	mat4 viewProj;
+    vec3 cameraPos;
+};
+
+struct Meshlet
+{
+	uint vertexOffset;
+	uint triangleOffset;
+	uint vertexCount;
+	uint triangleCount;
+};
+struct TaskInfo
+{
+	Meshlet meshlet;
+	uint meshletID;
+    uint modelID;
+};
+taskPayloadSharedEXT TaskInfo meshletIn;
+
+layout(location=0) out vec3 perVertexNormals[];
+layout(location=1) out flat uint meshletID[];
+layout(location=2) out flat uint meshID[];
+
+void main() {
+    SetMeshOutputsEXT(meshletIn.meshlet.vertexCount, meshletIn.meshlet.triangleCount);
+
+    for (uint i = gl_LocalInvocationIndex; i < meshletIn.meshlet.vertexCount; i += gl_WorkGroupSize.x) {
+        const uint index = meshletVertices[meshletIn.meshlet.vertexOffset + i];
+        const Vertex vert = vertexBuffer[index];
+        gl_MeshVerticesEXT[i].gl_Position = viewProj * models[meshletIn.modelID] * vec4(vert.position, 1);
+        perVertexNormals[i] = vert.normal;
+        meshletID[i] = meshletIn.meshletID;
+        meshID[i] = meshletIn.modelID;
+    }
+
+    for (uint i = gl_LocalInvocationIndex; i < meshletIn.meshlet.triangleCount; i += gl_WorkGroupSize.x) {
+        const uint offset = meshletIn.meshlet.triangleOffset + i * 3;
+        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(meshletTriangles[offset], meshletTriangles[offset + 1], meshletTriangles[offset + 2]);
+    }
+}

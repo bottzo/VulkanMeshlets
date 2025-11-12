@@ -7,7 +7,7 @@ Generate the mesh meshlets
 Render the mesh using mesh shaders
 Render the meshlets using task shaders
 Lambertian fragment shader using the normal from the meshlet
-GPU driven of 50000 meshlet meshes adding a compute shader with culling for models using the frustum aabb method
+GPU driven of 100000 meshlet meshes adding a compute shader with culling for models using the frustum aabb method
 
 HOW TO USE:
 Little camera movind with WASD and the keyboard arrows

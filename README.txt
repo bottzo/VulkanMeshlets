@@ -1,4 +1,4 @@
-This is my progres on the vulkan indirect meshlet renderer exercice on Sunday 3, (after roughly 1 week and 2 days from the start)
+This is my progres on the vulkan indirect meshlet renderer
 
 Acheived:
 Base vulkan engine
@@ -7,7 +7,7 @@ Generate the mesh meshlets
 Render the mesh using mesh shaders
 Render the meshlets using task shaders
 Lambertian fragment shader using the normal from the meshlet
-GPU driven of 50000 meshlet meshes adding a compute shader with culling for models using the frustum aabb method
+GPU driven of 100000 meshlet meshes adding a compute shader with culling for models using the frustum aabb method
 
 HOW TO USE:
 Little camera movind with WASD and the keyboard arrows

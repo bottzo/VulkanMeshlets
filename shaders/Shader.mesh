@@ -76,8 +76,9 @@ void main() {
     for (uint i = gl_LocalInvocationIndex; i < meshletIn.meshlet.vertexCount; i += gl_WorkGroupSize.x) {
         const uint index = meshletVertices[meshletIn.meshlet.vertexOffset + i];
         const Vertex vert = vertexBuffer[index];
-        gl_MeshVerticesEXT[i].gl_Position = viewProj * models[meshletIn.modelID] * vec4(vert.position, 1);
-        perVertexNormals[i] = vert.normal;
+        const mat4 model = models[meshletIn.modelID];
+        gl_MeshVerticesEXT[i].gl_Position = viewProj * model * vec4(vert.position, 1);
+        perVertexNormals[i] = transpose(inverse(mat3(model))) * vert.normal;
         meshletID[i] = meshletIn.meshletID;
         meshID[i] = meshletIn.modelID;
     }

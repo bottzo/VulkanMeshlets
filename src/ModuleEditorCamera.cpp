@@ -1,7 +1,6 @@
 #include "ModuleEditorCamera.h"
 #include "ModuleInput.h"
 #include "ModuleWindow.h"
-#include "ModuleVulkan.h"
 #include "glm/glm.hpp"
 #include "glm/ext/matrix_transform.hpp"
 

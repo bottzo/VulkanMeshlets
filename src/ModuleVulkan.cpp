@@ -131,13 +131,13 @@ bool ModuleVulkan::Init()
 			continue;
 
 		//Mesh shader support
-		VkPhysicalDeviceVulkan11Features onePointOneFeatures{};
-		onePointOneFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
 		VkPhysicalDeviceMeshShaderFeaturesEXT meshShadingFeatures{};
 		meshShadingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
-		meshShadingFeatures.pNext = &onePointOneFeatures;
+		VkPhysicalDeviceVulkan11Features onePointOneFeatures{};
+		onePointOneFeatures.pNext = &meshShadingFeatures;
+		onePointOneFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
 		deviceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-		deviceFeatures.pNext = &meshShadingFeatures;
+		deviceFeatures.pNext = &onePointOneFeatures;
 		vkGetPhysicalDeviceFeatures2(device, &deviceFeatures);
 		if (meshShadingFeatures.meshShader == VK_FALSE || meshShadingFeatures.taskShader == VK_FALSE)
 		{

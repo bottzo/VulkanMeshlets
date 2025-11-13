@@ -7,7 +7,6 @@
 
 class ModuleInput;
 class ModuleWindow;
-class ModuleVulkan;
 
 class Camera
 {

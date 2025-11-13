@@ -48,7 +48,7 @@ void main()
 	//	meshletIn.meshletID = gl_WorkGroupID.x;
 	//	EmitMeshTasksEXT(gl_NumWorkGroups.x, 1, 1);
 	//}
-	CullingInfo cInfo = meshletCullInfos[gl_WorkGroupID.x];
+	//CullingInfo cInfo = meshletCullInfos[gl_WorkGroupID.x];
 	//if (dot(normalize((models[gl_DrawID] * vec4(cInfo.coneApex, 1.0f)).xyz - cameraPos), (models[gl_DrawID] * vec4(cInfo.coneAxis, 1.0f)).xyz) < cInfo.coneCutoff)
 	//if (dot(normalize(cInfo.coneApex - cameraPos), cInfo.coneAxis) < cInfo.coneCutoff)
 	//{

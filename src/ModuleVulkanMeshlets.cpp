@@ -843,7 +843,7 @@ bool ModuleVulkan::Init()
 		!CreateBuffer(meshletMesh.mesh.numVertices * sizeof(Vertex), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory) ||
 		!CreateBuffer(sizeof(uint32_t) * NUM_MODELS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, meshMeshletGroupSizeBuffer, meshMeshletGroupSizeBufferMemory) ||
 		!CreateBuffer(sizeof(uint32_t) * 3 * NUM_MODELS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, dispatchIndirectBuffer, dispatchIndirectBufferMemory) ||
-		!CreateBuffer(sizeof(uint32_t) * NUM_MODELS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, modelIDsBuffer, modelIDsBufferMemory))
+		!CreateBuffer(sizeof(uint32_t) * NUM_MODELS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, modelIDsBuffer, modelIDsBufferMemory))
 	{
 		LOG("Error creating the device buffers");
 		return false;

@@ -1,44 +1,45 @@
 #version 460
 
+layout(constant_id = 0) const uint MESHLET_COUNT = 17;
+struct Command
+{
+	uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int vertexOffset;
+    uint firstInstance;
+};
+layout(binding = 0) uniform uboData 
+{
+	vec4 frustumPlanes[6];
+	uint numModels;
+};
+layout(std430, binding = 1) writeonly buffer OutputCommands { Command outCommands[]; };
+layout(std430, binding = 2) writeonly buffer ModelIDs { uint modelIDs[]; }; //output to access the model matrix correctly on vertex shader
 struct Box
 {
 	vec3 points[8];
 };
-struct Command
+layout(std430, binding = 3) readonly buffer OBBS
 {
-	uint dispatchThreadsX;	// Number of mesh meshlets
-	uint dispatchThreadsY;  // 1
-	uint dispatchThreadsZ;  // 1
+	Box OBBs[]; //perMeshlet
 };
-layout(std430, binding = 4) readonly buffer OBBS
+layout(std430, binding = 4) readonly buffer Transforms
 {
-	Box OBBs[];
+	mat4 models[]; //perModel
 };
-layout(std430, binding = 5) readonly buffer Transforms
-{
-	mat4 models[];
-};
-layout(std430, binding = 1) readonly buffer MeshletCounts { uint modelMeshletCount[]; };
-layout(std430, binding = 2) writeonly buffer WriteCommands { Command outCommands[]; };
-layout(std430, binding = 3) writeonly buffer ParameterBuffer { int numOutCommands; };
-layout(std430, binding = 6) writeonly buffer ModelIDs { uint modelIDs[]; };
-layout(binding = 0) uniform uboData 
-{
-	vec4 frustumPlanes[6];
-	uint numCommands;
-};
-
-layout(constant_id = 0) const uint TASK_WORK_GROUP_SIZE = 32;
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 void main()
 {
-	if(gl_GlobalInvocationID.x < numCommands) 
+	if(gl_GlobalInvocationID.x < (numModels * MESHLET_COUNT)) 
     {
+		const uint currModel = gl_GlobalInvocationID.x / MESHLET_COUNT;
+		const uint currMeshlet = gl_GlobalInvocationID.x % MESHLET_COUNT;
 		Box obb;
 		for(uint i = 0; i<8; ++i)
 		{
-			obb.points[i] =  (models[gl_GlobalInvocationID.x] * vec4(OBBs[gl_GlobalInvocationID.x].points[i], 1.0)).xyz;
+			obb.points[i] =  (models[currModel] * vec4(OBBs[currMeshlet].points[i], 1.0)).xyz;
 		}
 		for(uint i = 0; i<6; ++i)
 		{
@@ -52,10 +53,11 @@ void main()
 			if(outPoint == 8)
 				return;
 		}
-		uint outIdx = atomicAdd(numOutCommands, 1);
-		outCommands[outIdx].dispatchThreadsX = (modelMeshletCount[gl_GlobalInvocationID.x] + TASK_WORK_GROUP_SIZE - 1) / TASK_WORK_GROUP_SIZE;
-		outCommands[outIdx].dispatchThreadsY = 1;
-		outCommands[outIdx].dispatchThreadsZ = 1;
-		modelIDs[outIdx] = gl_GlobalInvocationID.x;
+		const uint outIdx = atomicAdd(outCommands[currMeshlet].instanceCount, 1);
+		modelIDs[currMeshlet * numModels + outIdx] = currModel;
+
+		//const uint startingMeshletOffset = atomicAdd(outCommand.indexCount, meshlets[currMeshlet].triangleCount / 3);
+		//modelIDs[currMeshlet * numModels + outIdx] = currModel;
+		//modelIDs[currMeshlet * numModels + outIdx] = currModel;
 	}
 }

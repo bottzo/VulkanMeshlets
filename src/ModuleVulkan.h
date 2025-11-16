@@ -12,9 +12,8 @@ class ModuleEditorCamera;
 
 struct Vertex
 {
-	//the 4th component of each is just for alignment purposes
-	float position[4];
-	float normal[4];
+	float position[3];
+	float normal[3];
 };
 
 struct Mesh
@@ -36,6 +35,8 @@ struct MeshletMesh
 	size_t meshletCount;
 	size_t maxMeshlets;
 	Mesh mesh;
+	unsigned int meshletIndexesCount;
+	unsigned int* meshletIndexes;
 	unsigned int GetMeshletsVerticeCount();
 	unsigned int GetMeshletsTriangleCount();
 };
@@ -47,6 +48,7 @@ public:
 	AABB() = default;
 	AABB(const Mesh& mesh) { Generate(mesh); }
 	void Generate(const Mesh& mesh);
+	void Generate(const MeshletMesh& mesh, unsigned int meshletIdx);
 	void GetPoints(glm::vec3(&points)[8]) const;
 private:
 	glm::vec3 minPoint;
@@ -115,8 +117,6 @@ private:
 	uint32_t swapChainImageIndex = 0;
 	uint32_t meshletMaxOutputVertices = 0;
 	uint32_t meshletMaxOutputPrimitives = 0;
-	uint32_t maxPreferredMeshWorkGroupInvocations = 0;
-	uint32_t maxPreferredTaskWorkGroupInvocations = 0;
 	VkDeviceSize minStorageBufferOffsetAlignment = 0;
 	VkDeviceSize minUniformBufferOffsetAlignment = 0;
 	VkDescriptorPool descriptorPool;
@@ -125,29 +125,18 @@ private:
 	VkDebugUtilsMessengerEXT debugMessenger;
 	bool layersEnabled = false;
 #endif // !NDEBUG
-	VkBuffer meshletBuffer;
-	VkBuffer meshletCullInfoBuffer;
-	VkBuffer meshletVerticesBuffer;
-	VkBuffer meshletTrianglesBuffer;
 	VkBuffer vertexBuffer;
-	VkBuffer transformsBuffer;
-	VkDeviceMemory meshletBufferMemory;
-	VkDeviceMemory meshletCullInfoBufferMemory;
-	VkDeviceMemory meshletVerticesBufferMemory;
-	VkDeviceMemory meshletTrianglesBufferMemory;
 	VkDeviceMemory vertexBufferMemory;
+	VkBuffer indexBuffer;
+	VkDeviceMemory indexBufferMemory;
+	VkBuffer transformsBuffer;
 	VkDeviceMemory transformsBufferMemory;
 	void* transformsBufferPtr[MAX_FRAMES_IN_FLIGHT];
-
-	VkBuffer meshMeshletGroupSizeBuffer;
-	VkDeviceMemory meshMeshletGroupSizeBufferMemory;
 	VkBuffer dispatchIndirectBuffer;
 	VkDeviceMemory dispatchIndirectBufferMemory;
+	void* dispatchIndirectBufferPtr[MAX_FRAMES_IN_FLIGHT];
 	VkBuffer modelIDsBuffer;
 	VkDeviceMemory modelIDsBufferMemory;
-	VkBuffer parameterBuffer;
-	VkDeviceMemory parameterBufferMemory;
-	void* parameterBufferPtr[MAX_FRAMES_IN_FLIGHT];
 	VkBuffer frustumPlanesBuffer;
 	VkDeviceMemory frustumPlanesBufferMemory;
 	void* frustumPlanesBufferPtr[MAX_FRAMES_IN_FLIGHT];
@@ -175,7 +164,7 @@ private:
 	{
 		return (structSize + (alignment - 1)) & ~(alignment - 1);
 	}
-	AABB modelAABB;
+	AABB* modelAABB;
 	glm::mat4* modelMatrices;
 	
 };

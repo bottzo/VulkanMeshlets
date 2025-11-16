@@ -1,4 +1,4 @@
-#include "ModuleVulkanMeshlets.h"
+#include "ModuleVulkan.h"
 #include "ModuleWindow.h"
 #include "ModuleEditorCamera.h"
 #include "FileSystem.h"
@@ -119,7 +119,7 @@ bool ModuleVulkan::Init()
 	vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
 	VkPhysicalDevice* physicalDevices = new VkPhysicalDevice[deviceCount];
 	vkEnumeratePhysicalDevices(instance, &deviceCount, physicalDevices);
-	const char* requiredDeviceExtensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_MESH_SHADER_EXTENSION_NAME, VK_KHR_SPIRV_1_4_EXTENSION_NAME, VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME };
+	const char* requiredDeviceExtensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 	VkFormat depthFormats[] = { VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT };
 	VkPhysicalDeviceFeatures2 deviceFeatures{};
 	for (int physicalDeviceIndex = 0; physicalDeviceIndex < deviceCount; ++physicalDeviceIndex)
@@ -130,37 +130,23 @@ bool ModuleVulkan::Init()
 		if (!CheckDeviceExtensionSupport(device, requiredDeviceExtensions, sizeof(requiredDeviceExtensions) / sizeof(const char*)))
 			continue;
 
-		//Mesh shader support
-		VkPhysicalDeviceMeshShaderFeaturesEXT meshShadingFeatures{};
-		meshShadingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
 		VkPhysicalDeviceVulkan11Features onePointOneFeatures{};
-		onePointOneFeatures.pNext = &meshShadingFeatures;
 		onePointOneFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
 		deviceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 		deviceFeatures.pNext = &onePointOneFeatures;
 		vkGetPhysicalDeviceFeatures2(device, &deviceFeatures);
-		if (meshShadingFeatures.meshShader == VK_FALSE || meshShadingFeatures.taskShader == VK_FALSE)
-		{
-			LOG("PhysicalDevice %d does not support required mesh shaders", physicalDeviceIndex);
-			continue;
-		}
 		if (onePointOneFeatures.shaderDrawParameters == VK_FALSE)
 		{
 			LOG("PhysicalDevice %d does not support draw parameters and the gl_DrawID is required for indirect draw calls", physicalDeviceIndex);
 			continue;
 		}
-		VkPhysicalDeviceMeshShaderPropertiesEXT meshShadingProperties{};
-		meshShadingProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT;
 		VkPhysicalDeviceProperties2 deviceProperties{};
 		deviceProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-		deviceProperties.pNext = &meshShadingProperties;
 		vkGetPhysicalDeviceProperties2(device, &deviceProperties);
 		minStorageBufferOffsetAlignment = deviceProperties.properties.limits.minStorageBufferOffsetAlignment;
 		minUniformBufferOffsetAlignment = deviceProperties.properties.limits.minUniformBufferOffsetAlignment;
-		meshletMaxOutputVertices = meshShadingProperties.maxMeshOutputVertices;
-		meshletMaxOutputPrimitives = meshShadingProperties.maxMeshOutputPrimitives;
-		maxPreferredTaskWorkGroupInvocations = meshShadingProperties.maxPreferredTaskWorkGroupInvocations;
-		maxPreferredMeshWorkGroupInvocations = meshShadingProperties.maxPreferredMeshWorkGroupInvocations;
+		meshletMaxOutputVertices = 256;
+		meshletMaxOutputPrimitives = 256;
 
 		//SwapChain Support
 		uint32_t formatCount;
@@ -216,15 +202,6 @@ bool ModuleVulkan::Init()
 	{
 		//CleanUp();
 		LOG("Error: no suitable physical device found");
-		return false;
-	}
-
-	vkCmdDrawMeshTasksEXT = (PFN_vkCmdDrawMeshTasksEXT)vkGetInstanceProcAddr(instance, "vkCmdDrawMeshTasksEXT");
-	vkCmdDrawMeshTasksIndirectEXT = (PFN_vkCmdDrawMeshTasksIndirectEXT)vkGetInstanceProcAddr(instance, "vkCmdDrawMeshTasksIndirectEXT");
-	vkCmdDrawMeshTasksIndirectCountEXT = (PFN_vkCmdDrawMeshTasksIndirectCountEXT)vkGetInstanceProcAddr(instance, "vkCmdDrawMeshTasksIndirectCountEXT");
-	if (vkCmdDrawMeshTasksEXT == nullptr || vkCmdDrawMeshTasksIndirectCountEXT == nullptr || vkCmdDrawMeshTasksIndirectEXT == nullptr)
-	{
-		LOG("Error getting the vulkan meshlet draw call funcions");
 		return false;
 	}
 
@@ -346,77 +323,67 @@ bool ModuleVulkan::Init()
 	if (!CreateFrameBuffers())
 		return false;
 
-	char* taskSource = nullptr;
-	char* meshSource = nullptr;
+	char* vertexSource = nullptr;
 	char* fragmentSource = nullptr;
-	long taskSourceSize = FileSystem::ReadToBuffer("shaders/MeshShading/task.spv", taskSource, "rb");
-	long meshSourceSize = FileSystem::ReadToBuffer("shaders/MeshShading/mesh.spv", meshSource, "rb");
+	long vertexSourceSize = FileSystem::ReadToBuffer("shaders/VertexShading/vert.spv", vertexSource, "rb");
 	long fragmentSourceSize = FileSystem::ReadToBuffer("shaders/fragment.spv", fragmentSource, "rb");
-	if (!(meshSourceSize && fragmentSourceSize && taskSource))
+	if (!(vertexSourceSize && fragmentSourceSize))
 	{
 		LOG("Error loading the shaders from a file");
 		return false;
 	}
-	VkShaderModule taskModule;
-	VkShaderModule meshModule;
+	VkShaderModule vertexModule;
 	VkShaderModule fragmentModule;
 	VkShaderModuleCreateInfo shaderModuleCreateInfo{};
 	shaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	shaderModuleCreateInfo.codeSize = taskSourceSize;
-	shaderModuleCreateInfo.pCode = reinterpret_cast<uint32_t*>(taskSource);
-	VkResult taskResult = vkCreateShaderModule(device, &shaderModuleCreateInfo, nullptr, &taskModule);
-	shaderModuleCreateInfo.codeSize = meshSourceSize;
-	shaderModuleCreateInfo.pCode = reinterpret_cast<uint32_t*>(meshSource);
-	VkResult meshResult = vkCreateShaderModule(device, &shaderModuleCreateInfo, nullptr, &meshModule);
+	shaderModuleCreateInfo.codeSize = vertexSourceSize;
+	shaderModuleCreateInfo.pCode = reinterpret_cast<uint32_t*>(vertexSource);
+	VkResult vertexResult = vkCreateShaderModule(device, &shaderModuleCreateInfo, nullptr, &vertexModule);
 	shaderModuleCreateInfo.codeSize = fragmentSourceSize;
 	shaderModuleCreateInfo.pCode = reinterpret_cast<uint32_t*>(fragmentSource);
 	VkResult fragmentResult = vkCreateShaderModule(device, &shaderModuleCreateInfo, nullptr, &fragmentModule);
-	if (taskResult != VK_SUCCESS || meshResult != VK_SUCCESS || fragmentResult != VK_SUCCESS)
+	if (vertexResult != VK_SUCCESS || fragmentResult != VK_SUCCESS)
 	{
 		LOG("Error crating the shader Modules");
 		return false;
 	}
-	delete[] taskSource;
-	delete[] meshSource;
+	delete[] vertexSource;
 	delete[] fragmentSource;
 
-	VkSpecializationMapEntry taskMapEntry{};
-	taskMapEntry.constantID = 1;
-	taskMapEntry.offset = 0;
-	taskMapEntry.size = sizeof(maxPreferredTaskWorkGroupInvocations);
-	VkSpecializationInfo taskSpecializationInfo{};
-	taskSpecializationInfo.dataSize = sizeof(maxPreferredTaskWorkGroupInvocations);
-	taskSpecializationInfo.pData = &maxPreferredTaskWorkGroupInvocations;
-	taskSpecializationInfo.mapEntryCount = 1;
-	taskSpecializationInfo.pMapEntries = &taskMapEntry;
-	VkSpecializationMapEntry meshMapEntry[2]{};
-	meshMapEntry[0].constantID = 0;
-	meshMapEntry[0].offset = 0;
-	meshMapEntry[0].size = sizeof(maxPreferredMeshWorkGroupInvocations);
-	meshMapEntry[1].constantID = 1;
-	meshMapEntry[1].offset = sizeof(uint32_t);
-	meshMapEntry[1].size = sizeof(maxPreferredTaskWorkGroupInvocations);
-	uint32_t meshletData[] = { maxPreferredMeshWorkGroupInvocations, maxPreferredTaskWorkGroupInvocations };
-	VkSpecializationInfo meshSpecializationInfo{};
-	meshSpecializationInfo.dataSize = sizeof(meshletData);
-	meshSpecializationInfo.pData = meshletData;
-	meshSpecializationInfo.mapEntryCount = sizeof(meshMapEntry) / sizeof(VkSpecializationMapEntry);
-	meshSpecializationInfo.pMapEntries = meshMapEntry;
-	VkPipelineShaderStageCreateInfo shaderStagesInfo[3]{};
+	VkPipelineShaderStageCreateInfo shaderStagesInfo[2]{};
 	shaderStagesInfo[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	shaderStagesInfo[0].stage = VK_SHADER_STAGE_TASK_BIT_EXT;
-	shaderStagesInfo[0].module = taskModule;
+	shaderStagesInfo[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	shaderStagesInfo[0].module = vertexModule;
 	shaderStagesInfo[0].pName = "main";
-	shaderStagesInfo[0].pSpecializationInfo = &taskSpecializationInfo;
 	shaderStagesInfo[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	shaderStagesInfo[1].stage = VK_SHADER_STAGE_MESH_BIT_EXT;
-	shaderStagesInfo[1].pSpecializationInfo = &meshSpecializationInfo;
-	shaderStagesInfo[1].module = meshModule;
+	shaderStagesInfo[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	shaderStagesInfo[1].module = fragmentModule;
 	shaderStagesInfo[1].pName = "main";
-	shaderStagesInfo[2].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	shaderStagesInfo[2].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-	shaderStagesInfo[2].module = fragmentModule;
-	shaderStagesInfo[2].pName = "main";
+
+	VkVertexInputAttributeDescription vInputAttributeDescription[2]{};
+	vInputAttributeDescription[0].binding = 0;
+	vInputAttributeDescription[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+	vInputAttributeDescription[0].location = 0;
+	vInputAttributeDescription[0].offset = 0;
+	vInputAttributeDescription[1].binding = 0;
+	vInputAttributeDescription[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+	vInputAttributeDescription[1].location = 1;
+	vInputAttributeDescription[1].offset = sizeof(float) * 3;
+	VkVertexInputBindingDescription vInputBindingDescription{};
+	vInputBindingDescription.binding = 0;
+	vInputBindingDescription.stride = sizeof(Vertex);
+	vInputBindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+	VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+	vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vertexInputInfo.vertexBindingDescriptionCount = 1;
+	vertexInputInfo.pVertexBindingDescriptions = &vInputBindingDescription; // Optional
+	vertexInputInfo.vertexAttributeDescriptionCount = sizeof(vInputAttributeDescription) / sizeof(VkVertexInputAttributeDescription);
+	vertexInputInfo.pVertexAttributeDescriptions = vInputAttributeDescription; // Optional
+	
+	VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	inputAssembly.primitiveRestartEnable = VK_FALSE;
 
 	VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 
@@ -424,18 +391,6 @@ bool ModuleVulkan::Init()
 	dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 	dynamicState.dynamicStateCount = static_cast<uint32_t>(sizeof(dynamicStates) / sizeof(VkDynamicState));
 	dynamicState.pDynamicStates = dynamicStates;
-
-	//VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-	//vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-	//vertexInputInfo.vertexBindingDescriptionCount = 0;
-	//vertexInputInfo.pVertexBindingDescriptions = nullptr; // Optional
-	//vertexInputInfo.vertexAttributeDescriptionCount = 0;
-	//vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
-	//
-	//VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-	//inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-	//inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-	//inputAssembly.primitiveRestartEnable = VK_FALSE;
 
 	VkViewport viewport{};
 	viewport.x = 0.0f;
@@ -510,60 +465,30 @@ bool ModuleVulkan::Init()
 	depthStencil.front = {}; // Optional
 	depthStencil.back = {}; // Optional
 
-	VkDescriptorSetLayoutBinding layoutBindings[9]{};
+	VkDescriptorSetLayoutBinding layoutBindings[4]{};
 	layoutBindings[0].binding = 0;
-	layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	layoutBindings[0].descriptorCount = 1;
-	layoutBindings[0].stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
+	layoutBindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	layoutBindings[0].pImmutableSamplers = nullptr; // Optional
 
 	layoutBindings[1].binding = 1;
-	layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	layoutBindings[1].descriptorCount = 1;
-	layoutBindings[1].stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
+	layoutBindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	layoutBindings[1].pImmutableSamplers = nullptr; // Optional
 
 	layoutBindings[2].binding = 2;
 	layoutBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	layoutBindings[2].descriptorCount = 1;
-	layoutBindings[2].stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
+	layoutBindings[2].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	layoutBindings[2].pImmutableSamplers = nullptr; // Optional
 
 	layoutBindings[3].binding = 3;
 	layoutBindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	layoutBindings[3].descriptorCount = 1;
-	layoutBindings[3].stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
+	layoutBindings[3].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	layoutBindings[3].pImmutableSamplers = nullptr; // Optional
-
-	layoutBindings[4].binding = 4;
-	layoutBindings[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	layoutBindings[4].descriptorCount = 1;
-	layoutBindings[4].stageFlags = VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT;
-	layoutBindings[4].pImmutableSamplers = nullptr; // Optional
-
-	layoutBindings[5].binding = 5;
-	layoutBindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	layoutBindings[5].descriptorCount = 1;
-	layoutBindings[5].stageFlags = VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT;
-	layoutBindings[5].pImmutableSamplers = nullptr; // Optional
-
-	layoutBindings[6].binding = 6;
-	layoutBindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	layoutBindings[6].descriptorCount = 1;
-	layoutBindings[6].stageFlags = VK_SHADER_STAGE_TASK_BIT_EXT;
-	layoutBindings[6].pImmutableSamplers = nullptr; // Optional
-
-	layoutBindings[7].binding = 7;
-	layoutBindings[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	layoutBindings[7].descriptorCount = 1;
-	layoutBindings[7].stageFlags = VK_SHADER_STAGE_TASK_BIT_EXT;
-	layoutBindings[7].pImmutableSamplers = nullptr; // Optional
-
-	layoutBindings[8].binding = 8;
-	layoutBindings[8].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	layoutBindings[8].descriptorCount = 1;
-	layoutBindings[8].stageFlags = VK_SHADER_STAGE_TASK_BIT_EXT;
-	layoutBindings[8].pImmutableSamplers = nullptr; // Optional
 
 	VkDescriptorSetLayoutCreateInfo layoutInfo{};
 	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -595,8 +520,8 @@ bool ModuleVulkan::Init()
 	pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 	pipelineInfo.stageCount = sizeof(shaderStagesInfo) / sizeof(VkPipelineShaderStageCreateInfo);
 	pipelineInfo.pStages = shaderStagesInfo;
-	pipelineInfo.pVertexInputState = nullptr;
-	pipelineInfo.pInputAssemblyState = nullptr;
+	pipelineInfo.pVertexInputState = &vertexInputInfo;
+	pipelineInfo.pInputAssemblyState = &inputAssembly;
 	pipelineInfo.pViewportState = &viewportState;
 	pipelineInfo.pRasterizationState = &rasterizer;
 	pipelineInfo.pMultisampleState = &multisampling;
@@ -614,12 +539,28 @@ bool ModuleVulkan::Init()
 		return false;
 	}
 	
-	vkDestroyShaderModule(device, taskModule, nullptr);
-	vkDestroyShaderModule(device, meshModule, nullptr);
+	vkDestroyShaderModule(device, vertexModule, nullptr);
 	vkDestroyShaderModule(device, fragmentModule, nullptr);
 
+
+	//Import the gltf model
+	Mesh mesh;
+	if (!ImporterMesh::ImportFirst("assets/Duck/Duck.gltf", mesh))
+	{
+		LOG("Error loading the model");
+		return false;
+	}
+	GenerateMeshlet(mesh, meshletMesh);
+	modelAABB = new AABB[meshletMesh.meshletCount];
+	for (int i = 0; i < meshletMesh.meshletCount; ++i)
+	{
+		//modelAABB[i].Generate(meshletMesh.mesh);
+		modelAABB[i].Generate(meshletMesh, i);
+	}
+
+	//Setup the culling compute shaders and pipeline
 	char* cullSource = nullptr;
-	long cullSourceSize = FileSystem::ReadToBuffer("shaders/MeshShading/cull.spv", cullSource, "rb");
+	long cullSourceSize = FileSystem::ReadToBuffer("shaders/VertexShading/cull.spv", cullSource, "rb");
 	if (cullSourceSize == 0)
 	{
 		LOG("Error loading the shaders from a file");
@@ -639,13 +580,13 @@ bool ModuleVulkan::Init()
 	VkSpecializationMapEntry cullMapEntry{};
 	cullMapEntry.constantID = 0;
 	cullMapEntry.offset = 0;
-	cullMapEntry.size = sizeof(maxPreferredTaskWorkGroupInvocations);
-	uint32_t cullData[] = { maxPreferredTaskWorkGroupInvocations };
+	cullMapEntry.size = sizeof(uint32_t);
+	uint32_t cullData[] = { static_cast<uint32_t>(meshletMesh.meshletCount) };
 	VkSpecializationInfo cullSpecializationInfo{};
-	taskSpecializationInfo.dataSize = sizeof(cullData);
-	taskSpecializationInfo.pData = cullData;
-	taskSpecializationInfo.mapEntryCount = 1;
-	taskSpecializationInfo.pMapEntries = &cullMapEntry;
+	cullSpecializationInfo.dataSize = sizeof(cullData);
+	cullSpecializationInfo.pData = cullData;
+	cullSpecializationInfo.mapEntryCount = 1;
+	cullSpecializationInfo.pMapEntries = &cullMapEntry;
 	VkPipelineShaderStageCreateInfo cullStageInfo{};
 	cullStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	cullStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -653,7 +594,7 @@ bool ModuleVulkan::Init()
 	cullStageInfo.pName = "main";
 	cullStageInfo.pSpecializationInfo = &cullSpecializationInfo;
 
-	VkDescriptorSetLayoutBinding cullDescriptorSetLayoutBindings[7]{};
+	VkDescriptorSetLayoutBinding cullDescriptorSetLayoutBindings[5]{};
 	cullDescriptorSetLayoutBindings[0].binding = 0;
 	cullDescriptorSetLayoutBindings[0].descriptorCount = 1;
 	cullDescriptorSetLayoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -674,14 +615,6 @@ bool ModuleVulkan::Init()
 	cullDescriptorSetLayoutBindings[4].descriptorCount = 1;
 	cullDescriptorSetLayoutBindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	cullDescriptorSetLayoutBindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	cullDescriptorSetLayoutBindings[5].binding = 5;
-	cullDescriptorSetLayoutBindings[5].descriptorCount = 1;
-	cullDescriptorSetLayoutBindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	cullDescriptorSetLayoutBindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	cullDescriptorSetLayoutBindings[6].binding = 6;
-	cullDescriptorSetLayoutBindings[6].descriptorCount = 1;
-	cullDescriptorSetLayoutBindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	cullDescriptorSetLayoutBindings[6].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 	VkDescriptorSetLayoutCreateInfo cullDescriptorSetLayoutInfo{};
 	cullDescriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 	cullDescriptorSetLayoutInfo.bindingCount = sizeof(cullDescriptorSetLayoutBindings) / sizeof(VkDescriptorSetLayoutBinding);
@@ -749,26 +682,16 @@ bool ModuleVulkan::Init()
 		}
 	}
 
-	//Import the gltf model
-	Mesh mesh;
-	if (!ImporterMesh::ImportFirst("assets/Duck/Duck.gltf", mesh))
-	{
-		LOG("Error loading the model");
-		return false;
-	}
-	GenerateMeshlet(mesh, meshletMesh);
-	modelAABB.Generate(meshletMesh.mesh);
-
 	const size_t transformsSize = sizeof(float) * 19;
 	const size_t frustumPlaneSize = sizeof(float) * 4 * 6 + sizeof(uint32_t);
 	const size_t modelMatricesSize = sizeof(float) * 16 * NUM_MODELS;
-	const size_t OBBsSize = sizeof(float) * 4 * 8 * NUM_MODELS; //one for padding
-	const size_t parameterSize = sizeof(uint32_t);
+	const size_t OBBsSize = sizeof(float) * 4 * 8 * meshletMesh.meshletCount; //one for padding(4 and not 3)
+	const size_t dispatchIndirectSize = sizeof(VkDrawIndexedIndirectCommand) * meshletMesh.meshletCount;
 	if (!CreateBuffer((transformsSize + GetInbetweenAlignmentSpace(transformsSize, minUniformBufferOffsetAlignment)) * MAX_FRAMES_IN_FLIGHT, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT , VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, transformsBuffer, transformsBufferMemory) ||
 		!CreateBuffer((frustumPlaneSize + GetInbetweenAlignmentSpace(frustumPlaneSize, minUniformBufferOffsetAlignment)) * MAX_FRAMES_IN_FLIGHT, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, frustumPlanesBuffer, frustumPlanesBufferMemory) ||
 		!CreateBuffer((modelMatricesSize + GetInbetweenAlignmentSpace(modelMatricesSize, minStorageBufferOffsetAlignment)) * MAX_FRAMES_IN_FLIGHT, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, modelMatricesBuffer, modelMatricesBufferMemory) ||
 		!CreateBuffer((OBBsSize + GetInbetweenAlignmentSpace(OBBsSize, minStorageBufferOffsetAlignment)) * MAX_FRAMES_IN_FLIGHT, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, OBBsBuffer, OBBsBufferMemory) ||
-		!CreateBuffer((parameterSize + GetInbetweenAlignmentSpace(parameterSize, minStorageBufferOffsetAlignment)) * MAX_FRAMES_IN_FLIGHT, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, parameterBuffer, parameterBufferMemory))
+		!CreateBuffer((dispatchIndirectSize + GetInbetweenAlignmentSpace(dispatchIndirectSize, minStorageBufferOffsetAlignment)) * MAX_FRAMES_IN_FLIGHT, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, dispatchIndirectBuffer, dispatchIndirectBufferMemory))
 	{
 		LOG("Error creating the uniform and persistent buffers");
 		return false;
@@ -778,14 +701,14 @@ bool ModuleVulkan::Init()
 	vkMapMemory(device, frustumPlanesBufferMemory, 0, VK_WHOLE_SIZE, 0, &frustumPlanesBufferPtr[0]);
 	vkMapMemory(device, modelMatricesBufferMemory, 0, VK_WHOLE_SIZE, 0, &modelMatricesBufferPtr[0]);
 	vkMapMemory(device, OBBsBufferMemory, 0, VK_WHOLE_SIZE, 0, &OBBsBufferPtr[0]);
-	vkMapMemory(device, parameterBufferMemory, 0, VK_WHOLE_SIZE, 0, &parameterBufferPtr[0]);
+	vkMapMemory(device, dispatchIndirectBufferMemory, 0, VK_WHOLE_SIZE, 0, &dispatchIndirectBufferPtr[0]);
 	for (int i = 1; i < MAX_FRAMES_IN_FLIGHT; ++i)
 	{
 		transformsBufferPtr[i] = static_cast<char*>(transformsBufferPtr[0]) + (transformsSize + GetInbetweenAlignmentSpace(transformsSize, minUniformBufferOffsetAlignment)) * i;
 		frustumPlanesBufferPtr[i] = static_cast<char*>(frustumPlanesBufferPtr[0]) + (frustumPlaneSize + GetInbetweenAlignmentSpace(frustumPlaneSize, minUniformBufferOffsetAlignment)) * i;
 		modelMatricesBufferPtr[i] = static_cast<char*>(modelMatricesBufferPtr[0]) + (modelMatricesSize + GetInbetweenAlignmentSpace(modelMatricesSize, minStorageBufferOffsetAlignment)) * i;
 		OBBsBufferPtr[i] = static_cast<char*>(OBBsBufferPtr[0]) + (OBBsSize + GetInbetweenAlignmentSpace(OBBsSize, minStorageBufferOffsetAlignment)) * i;
-		parameterBufferPtr[i] = static_cast<char*>(parameterBufferPtr[0]) + (parameterSize + GetInbetweenAlignmentSpace(parameterSize, minStorageBufferOffsetAlignment)) * i;
+		dispatchIndirectBufferPtr[i] = static_cast<char*>(dispatchIndirectBufferPtr[0]) + (dispatchIndirectSize + GetInbetweenAlignmentSpace(dispatchIndirectSize, minStorageBufferOffsetAlignment)) * i;
 	}
 
 	//initialize uniform buffers
@@ -799,9 +722,7 @@ bool ModuleVulkan::Init()
 
 	VkBuffer stagingBuffer;
 	VkDeviceMemory stagingBufferMemory;
-	size_t stagingBufferSize = meshletMesh.meshletCount * sizeof(meshopt_Meshlet) +
-		meshletMesh.meshletCount * sizeof(float) * 8 + //meshopt_Bounds
-		meshletMesh.GetMeshletsVerticeCount() * sizeof(unsigned int) +
+	size_t stagingBufferSize = meshletMesh.GetMeshletsVerticeCount() * sizeof(unsigned int) +
 		meshletMesh.GetMeshletsTriangleCount() * sizeof(unsigned int) +
 		meshletMesh.mesh.numVertices * sizeof(Vertex) +
 		sizeof(uint32_t) * NUM_MODELS;
@@ -813,37 +734,15 @@ bool ModuleVulkan::Init()
 	void* stagingBufferPtr;
 	vkMapMemory(device, stagingBufferMemory, 0, stagingBufferSize, 0, &stagingBufferPtr);
 	unsigned int offset = 0;
-	memcpy(stagingBufferPtr, meshletMesh.meshlets, meshletMesh.meshletCount * sizeof(meshopt_Meshlet));
-	offset += meshletMesh.meshletCount * sizeof(meshopt_Meshlet);
-	for (int i = 0; i < meshletMesh.meshletCount; ++i)
-	{
-		memcpy(static_cast<char*>(stagingBufferPtr) + offset, meshletMesh.meshletBounds[i].cone_apex, sizeof(meshletMesh.meshletBounds->cone_apex));
-		offset += sizeof(float) * 3;
-		memcpy(static_cast<char*>(stagingBufferPtr) + offset, &meshletMesh.meshletBounds[i].cone_cutoff, sizeof(meshletMesh.meshletBounds->cone_cutoff));
-		offset += sizeof(float);
-		memcpy(static_cast<char*>(stagingBufferPtr) + offset, meshletMesh.meshletBounds[i].cone_axis, sizeof(meshletMesh.meshletBounds->cone_axis));
-		offset += sizeof(float) * 4;
-	}
-	memcpy(static_cast<char*>(stagingBufferPtr) + offset, meshletMesh.meshletVertices, meshletMesh.GetMeshletsVerticeCount() * sizeof(unsigned int));
-	offset += meshletMesh.GetMeshletsVerticeCount() * sizeof(unsigned int);
-	for (int i = 0; i < meshletMesh.GetMeshletsTriangleCount(); ++i)
-		reinterpret_cast<unsigned int*>(static_cast<char*>(stagingBufferPtr) + offset)[i] = meshletMesh.meshletTriangles[i];
-	//memcpy(static_cast<char*>(stagingBufferPtr) + offset, meshletMesh.meshletTriangles, meshletMesh.GetMeshletsTriangleCount() * sizeof(unsigned int));
-	offset += meshletMesh.GetMeshletsTriangleCount() * sizeof(unsigned int);
 	memcpy(static_cast<char*>(stagingBufferPtr) + offset, meshletMesh.mesh.vertices, meshletMesh.mesh.numVertices * sizeof(Vertex));
 	offset += meshletMesh.mesh.numVertices * sizeof(Vertex);
-	for(int i = 0; i < NUM_MODELS; ++i)
-		*reinterpret_cast<uint32_t*>(static_cast<char*>(stagingBufferPtr) + offset + sizeof(uint32_t) * i) = meshletMesh.meshletCount;
+	memcpy(static_cast<char*>(stagingBufferPtr) + offset, meshletMesh.meshletIndexes, meshletMesh.meshletIndexesCount * sizeof(unsigned int));
+	offset += meshletMesh.meshletIndexesCount * sizeof(unsigned int);
 	vkUnmapMemory(device, stagingBufferMemory);
 
-	if (!CreateBuffer(meshletMesh.meshletCount * sizeof(meshopt_Meshlet), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, meshletBuffer, meshletBufferMemory) ||
-		!CreateBuffer(meshletMesh.meshletCount * sizeof(float) * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, meshletCullInfoBuffer, meshletCullInfoBufferMemory) ||
-		!CreateBuffer(meshletMesh.GetMeshletsVerticeCount() * sizeof(unsigned int), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, meshletVerticesBuffer, meshletVerticesBufferMemory) ||
-		!CreateBuffer(meshletMesh.GetMeshletsTriangleCount() * sizeof(unsigned int), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, meshletTrianglesBuffer, meshletTrianglesBufferMemory) ||
-		!CreateBuffer(meshletMesh.mesh.numVertices * sizeof(Vertex), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory) ||
-		!CreateBuffer(sizeof(uint32_t) * NUM_MODELS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, meshMeshletGroupSizeBuffer, meshMeshletGroupSizeBufferMemory) ||
-		!CreateBuffer(sizeof(uint32_t) * 3 * NUM_MODELS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, dispatchIndirectBuffer, dispatchIndirectBufferMemory) ||
-		!CreateBuffer(sizeof(uint32_t) * NUM_MODELS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, modelIDsBuffer, modelIDsBufferMemory))
+	if (!CreateBuffer(meshletMesh.mesh.numVertices * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory) ||
+		!CreateBuffer(meshletMesh.meshletIndexesCount * sizeof(unsigned int), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory) ||
+		!CreateBuffer(sizeof(uint32_t) * NUM_MODELS * meshletMesh.meshletCount, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, modelIDsBuffer, modelIDsBufferMemory))
 	{
 		LOG("Error creating the device buffers");
 		return false;
@@ -883,31 +782,15 @@ bool ModuleVulkan::Init()
 
 	offset = 0;
 	VkBufferCopy bufferCopyRegion{};
-	bufferCopyRegion.size = meshletMesh.meshletCount * sizeof(meshopt_Meshlet);
-	bufferCopyRegion.dstOffset = 0;
-	bufferCopyRegion.srcOffset = 0;
-	vkCmdCopyBuffer(tmpCmdBuffer, stagingBuffer, meshletBuffer, 1, &bufferCopyRegion);
-	offset += bufferCopyRegion.size;
-	bufferCopyRegion.size = meshletMesh.meshletCount * sizeof(float) * 8;
 	bufferCopyRegion.dstOffset = 0;
 	bufferCopyRegion.srcOffset = offset;
-	vkCmdCopyBuffer(tmpCmdBuffer, stagingBuffer, meshletCullInfoBuffer, 1, &bufferCopyRegion);
-	offset += bufferCopyRegion.size;
-	bufferCopyRegion.size = meshletMesh.GetMeshletsVerticeCount() * sizeof(uint32_t);
-	bufferCopyRegion.srcOffset = offset;
-	vkCmdCopyBuffer(tmpCmdBuffer, stagingBuffer, meshletVerticesBuffer, 1, &bufferCopyRegion);
-	offset += bufferCopyRegion.size;
-	bufferCopyRegion.size = meshletMesh.GetMeshletsTriangleCount() * sizeof(uint32_t);
-	bufferCopyRegion.srcOffset = offset;
-	vkCmdCopyBuffer(tmpCmdBuffer, stagingBuffer, meshletTrianglesBuffer, 1, &bufferCopyRegion);
-	offset += bufferCopyRegion.size;
 	bufferCopyRegion.size = meshletMesh.mesh.numVertices * sizeof(Vertex);
-	bufferCopyRegion.srcOffset = offset;
 	vkCmdCopyBuffer(tmpCmdBuffer, stagingBuffer, vertexBuffer, 1, &bufferCopyRegion);
 	offset += bufferCopyRegion.size;
-	bufferCopyRegion.size = sizeof(uint32_t) * NUM_MODELS;
+	bufferCopyRegion.dstOffset = 0;
 	bufferCopyRegion.srcOffset = offset;
-	vkCmdCopyBuffer(tmpCmdBuffer, stagingBuffer, meshMeshletGroupSizeBuffer, 1, &bufferCopyRegion);
+	bufferCopyRegion.size = meshletMesh.meshletIndexesCount * sizeof(unsigned int);
+	vkCmdCopyBuffer(tmpCmdBuffer, stagingBuffer, indexBuffer, 1, &bufferCopyRegion);
 
 	vkEndCommandBuffer(tmpCmdBuffer);
 	VkSubmitInfo submitInfo{};
@@ -925,14 +808,14 @@ bool ModuleVulkan::Init()
 	VkDescriptorPoolSize poolSize[4]{};
 	//graphics descriptors
 	poolSize[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	poolSize[0].descriptorCount = 1 * MAX_FRAMES_IN_FLIGHT;
+	poolSize[0].descriptorCount = 2 * MAX_FRAMES_IN_FLIGHT;
 	poolSize[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	poolSize[1].descriptorCount = 7 * MAX_FRAMES_IN_FLIGHT;
+	poolSize[1].descriptorCount = 2 * MAX_FRAMES_IN_FLIGHT;
 	//cull descriptors
 	poolSize[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	poolSize[2].descriptorCount = 1 * MAX_FRAMES_IN_FLIGHT;
 	poolSize[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	poolSize[3].descriptorCount = 7 * MAX_FRAMES_IN_FLIGHT;
+	poolSize[3].descriptorCount = 4 * MAX_FRAMES_IN_FLIGHT;
 	VkDescriptorPoolCreateInfo dPoolInfo{};
 	dPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 	dPoolInfo.poolSizeCount = sizeof(poolSize) / sizeof(VkDescriptorPoolSize);
@@ -963,87 +846,42 @@ bool ModuleVulkan::Init()
 	}
 	//graphics
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		VkDescriptorBufferInfo uBufferInfo{};
-		uBufferInfo.buffer = transformsBuffer;
-		uBufferInfo.offset = (transformsSize + GetInbetweenAlignmentSpace(transformsSize, minUniformBufferOffsetAlignment)) * i;
-		uBufferInfo.range = transformsSize;
+		VkDescriptorBufferInfo uBufferInfo[2]{};
+		uBufferInfo[0].buffer = frustumPlanesBuffer;
+		uBufferInfo[0].offset = (frustumPlaneSize + GetInbetweenAlignmentSpace(frustumPlaneSize, minUniformBufferOffsetAlignment)) * i;
+		uBufferInfo[0].range = frustumPlaneSize;
+		uBufferInfo[1].buffer = transformsBuffer;
+		uBufferInfo[1].offset = (transformsSize + GetInbetweenAlignmentSpace(transformsSize, minUniformBufferOffsetAlignment)) * i;
+		uBufferInfo[1].range = transformsSize;
 
-		VkDescriptorBufferInfo ssBufferInfo[8]{};
-		ssBufferInfo[0].buffer = meshletVerticesBuffer;
-		ssBufferInfo[0].offset = 0;
-		ssBufferInfo[0].range = VK_WHOLE_SIZE;
-		ssBufferInfo[1].buffer = meshletTrianglesBuffer;
+		VkDescriptorBufferInfo ssBufferInfo[2]{};
+		ssBufferInfo[0].buffer = modelMatricesBuffer;
+		ssBufferInfo[0].offset = (modelMatricesSize + GetInbetweenAlignmentSpace(modelMatricesSize, minStorageBufferOffsetAlignment)) * i;
+		ssBufferInfo[0].range = modelMatricesSize;
+		ssBufferInfo[1].buffer = modelIDsBuffer;
 		ssBufferInfo[1].offset = 0;
 		ssBufferInfo[1].range = VK_WHOLE_SIZE;
-		ssBufferInfo[2].buffer = vertexBuffer;
-		ssBufferInfo[2].offset = 0;
-		ssBufferInfo[2].range = VK_WHOLE_SIZE;
-		ssBufferInfo[3].buffer = meshletBuffer;
-		ssBufferInfo[3].offset = 0;
-		ssBufferInfo[3].range = VK_WHOLE_SIZE;
-		ssBufferInfo[4].buffer = modelMatricesBuffer;
-		ssBufferInfo[4].offset = (modelMatricesSize + GetInbetweenAlignmentSpace(modelMatricesSize, minStorageBufferOffsetAlignment)) * i;
-		ssBufferInfo[4].range = modelMatricesSize;
-		ssBufferInfo[5].buffer = modelIDsBuffer;
-		ssBufferInfo[5].offset = 0;
-		ssBufferInfo[5].range = VK_WHOLE_SIZE;
-		ssBufferInfo[6].buffer = meshletCullInfoBuffer;
-		ssBufferInfo[6].offset = 0;
-		ssBufferInfo[6].range = VK_WHOLE_SIZE;
-		ssBufferInfo[7].buffer = meshMeshletGroupSizeBuffer;
-		ssBufferInfo[7].offset = 0;
-		ssBufferInfo[7].range = VK_WHOLE_SIZE;
 
-		VkWriteDescriptorSet descriptorWrite[5]{};
+		VkWriteDescriptorSet descriptorWrite[2]{};
 		descriptorWrite[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		descriptorWrite[0].dstSet = descriptorSets[i];
-		descriptorWrite[0].dstBinding = 1;
+		descriptorWrite[0].dstBinding = 0;
 		descriptorWrite[0].dstArrayElement = 0;
-		descriptorWrite[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		descriptorWrite[0].descriptorCount = 3;
-		descriptorWrite[0].pBufferInfo = ssBufferInfo;
+		descriptorWrite[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		descriptorWrite[0].descriptorCount = sizeof(uBufferInfo) / sizeof(VkDescriptorBufferInfo);
+		descriptorWrite[0].pBufferInfo = uBufferInfo;
 		descriptorWrite[0].pImageInfo = nullptr; // Optional
 		descriptorWrite[0].pTexelBufferView = nullptr; // Optional
 
 		descriptorWrite[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		descriptorWrite[1].dstSet = descriptorSets[i];
-		descriptorWrite[1].dstBinding = 4;
+		descriptorWrite[1].dstBinding = 2;
 		descriptorWrite[1].dstArrayElement = 0;
-		descriptorWrite[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		descriptorWrite[1].descriptorCount = 1;
-		descriptorWrite[1].pBufferInfo = &uBufferInfo;
+		descriptorWrite[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		descriptorWrite[1].descriptorCount = sizeof(ssBufferInfo) / sizeof(VkDescriptorBufferInfo);
+		descriptorWrite[1].pBufferInfo = ssBufferInfo;
 		descriptorWrite[1].pImageInfo = nullptr; // Optional
 		descriptorWrite[1].pTexelBufferView = nullptr; // Optional
-
-		descriptorWrite[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		descriptorWrite[2].dstSet = descriptorSets[i];
-		descriptorWrite[2].dstBinding = 0;
-		descriptorWrite[2].dstArrayElement = 0;
-		descriptorWrite[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		descriptorWrite[2].descriptorCount = 1;
-		descriptorWrite[2].pBufferInfo = &ssBufferInfo[3];
-		descriptorWrite[2].pImageInfo = nullptr; // Optional
-		descriptorWrite[2].pTexelBufferView = nullptr; // Optional
-
-		descriptorWrite[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		descriptorWrite[3].dstSet = descriptorSets[i];
-		descriptorWrite[3].dstBinding = 5;
-		descriptorWrite[3].dstArrayElement = 0;
-		descriptorWrite[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		descriptorWrite[3].descriptorCount = 1;
-		descriptorWrite[3].pBufferInfo = &ssBufferInfo[4];
-		descriptorWrite[3].pImageInfo = nullptr; // Optional
-		descriptorWrite[3].pTexelBufferView = nullptr; // Optional
-
-		descriptorWrite[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		descriptorWrite[4].dstSet = descriptorSets[i];
-		descriptorWrite[4].dstBinding = 6;
-		descriptorWrite[4].dstArrayElement = 0;
-		descriptorWrite[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		descriptorWrite[4].descriptorCount = 3;
-		descriptorWrite[4].pBufferInfo = &ssBufferInfo[5];
-		descriptorWrite[4].pImageInfo = nullptr; // Optional
-		descriptorWrite[4].pTexelBufferView = nullptr; // Optional
 
 		vkUpdateDescriptorSets(device, sizeof(descriptorWrite) / sizeof(VkWriteDescriptorSet), descriptorWrite, 0, nullptr);
 	}
@@ -1054,25 +892,19 @@ bool ModuleVulkan::Init()
 		uBufferInfo[0].offset = (frustumPlaneSize + GetInbetweenAlignmentSpace(frustumPlaneSize, minUniformBufferOffsetAlignment)) * i;
 		uBufferInfo[0].range = frustumPlaneSize;
 	
-		VkDescriptorBufferInfo ssBufferInfo[6]{};
-		ssBufferInfo[0].buffer = meshMeshletGroupSizeBuffer;
-		ssBufferInfo[0].offset = 0;
-		ssBufferInfo[0].range = VK_WHOLE_SIZE;
-		ssBufferInfo[1].buffer = dispatchIndirectBuffer;
+		VkDescriptorBufferInfo ssBufferInfo[4]{};
+		ssBufferInfo[0].buffer = dispatchIndirectBuffer;
+		ssBufferInfo[0].offset = (dispatchIndirectSize + GetInbetweenAlignmentSpace(dispatchIndirectSize, minStorageBufferOffsetAlignment)) * i;
+		ssBufferInfo[0].range = dispatchIndirectSize;
+		ssBufferInfo[1].buffer = modelIDsBuffer;
 		ssBufferInfo[1].offset = 0;
 		ssBufferInfo[1].range = VK_WHOLE_SIZE;
-		ssBufferInfo[2].buffer = parameterBuffer;
-		ssBufferInfo[2].offset = (parameterSize + GetInbetweenAlignmentSpace(parameterSize, minStorageBufferOffsetAlignment)) * i;
-		ssBufferInfo[2].range = parameterSize;
-		ssBufferInfo[3].buffer = OBBsBuffer;
-		ssBufferInfo[3].offset = (OBBsSize + GetInbetweenAlignmentSpace(OBBsSize, minStorageBufferOffsetAlignment)) * i;
-		ssBufferInfo[3].range = OBBsSize;
-		ssBufferInfo[4].buffer = modelMatricesBuffer;
-		ssBufferInfo[4].offset = (modelMatricesSize + GetInbetweenAlignmentSpace(modelMatricesSize, minStorageBufferOffsetAlignment)) * i;
-		ssBufferInfo[4].range = modelMatricesSize;
-		ssBufferInfo[5].buffer = modelIDsBuffer;
-		ssBufferInfo[5].offset = 0;
-		ssBufferInfo[5].range = VK_WHOLE_SIZE;
+		ssBufferInfo[2].buffer = OBBsBuffer;
+		ssBufferInfo[2].offset = (OBBsSize + GetInbetweenAlignmentSpace(OBBsSize, minStorageBufferOffsetAlignment)) * i;
+		ssBufferInfo[2].range = OBBsSize;
+		ssBufferInfo[3].buffer = modelMatricesBuffer;
+		ssBufferInfo[3].offset = (modelMatricesSize + GetInbetweenAlignmentSpace(modelMatricesSize, minStorageBufferOffsetAlignment)) * i;
+		ssBufferInfo[3].range = modelMatricesSize;
 	
 		VkWriteDescriptorSet descriptorWrite[2]{};
 		descriptorWrite[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1143,19 +975,17 @@ bool ModuleVulkan::Init()
 UpdateStatus ModuleVulkan::PostUpdate(float dt)
 {
 	vkWaitForFences(device, 1, &frameFences[currentFrame], VK_TRUE, UINT64_MAX);
-	//parameter buffer
-	*static_cast<uint32_t*>(parameterBufferPtr[currentFrame]) = 0;
 	SetCameraInfo(mCamera->GetProj() * mCamera->GetView(), mCamera->GetPosition());
 	//MODEL MATRICES
 	for (int i = 0; i < NUM_MODELS; ++i)
 		memcpy(static_cast<float*>(modelMatricesBufferPtr[currentFrame]) + 16 * i, &modelMatrices[i], sizeof(float) * 16);
 	// Bounding boxes
-	glm::vec3 AABBPoints[8];
-	modelAABB.GetPoints(AABBPoints);
-	for (int j = 0; j < NUM_MODELS; ++j)
+	for (int k = 0; k < meshletMesh.meshletCount; ++k)
 	{
+		glm::vec3 AABBPoints[8];
+		modelAABB[k].GetPoints(AABBPoints);
 		for (int i = 0; i < 8; ++i)
-			memcpy(static_cast<float*>(OBBsBufferPtr[currentFrame]) + (4 * 8 * j) + 4 * i, &AABBPoints[i], sizeof(glm::vec3));
+			memcpy(static_cast<float*>(OBBsBufferPtr[currentFrame]) + (4 * 8 * k) + 4 * i, &AABBPoints[i], sizeof(glm::vec3));
 	}
 	// frustum planes + numCommands(NUM_MODEL)
 	glm::vec4 planes[6];
@@ -1163,6 +993,20 @@ UpdateStatus ModuleVulkan::PostUpdate(float dt)
 	memcpy(frustumPlanesBufferPtr[currentFrame], planes, sizeof(planes));
 	const uint32_t numModels = NUM_MODELS;
 	memcpy(static_cast<float*>(frustumPlanesBufferPtr[currentFrame]) + 6 * 4, &numModels, sizeof(numModels));
+	//DispatchIndirectBuffer
+	unsigned int meshletOffset = 0;
+	for (int i = 0; i < meshletMesh.meshletCount; ++i)
+	{
+		VkDrawIndexedIndirectCommand command{};
+		const meshopt_Meshlet& meshlet = meshletMesh.meshlets[i];
+		command.firstIndex = meshletOffset;
+		command.firstInstance = 0;
+		command.indexCount = meshlet.triangle_count * 3;
+		command.instanceCount = 0;
+		command.vertexOffset = 0;
+		memcpy(static_cast<VkDrawIndexedIndirectCommand*>(dispatchIndirectBufferPtr[currentFrame]) + i, &command, sizeof(command));
+		meshletOffset += meshlet.triangle_count * 3;
+	}
 	VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &swapChainImageIndex);
 	if (result == VK_ERROR_OUT_OF_DATE_KHR) {
 		//check window minimized (TODO): handle it :)
@@ -1423,12 +1267,12 @@ void ModuleVulkan::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t i
 
 	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipelineLayout, 0, 1, &descriptorSets[currentFrame + MAX_FRAMES_IN_FLIGHT], 0, nullptr);
-	vkCmdDispatch(commandBuffer, (NUM_MODELS + 63) / 64, 1, 1);
+	vkCmdDispatch(commandBuffer, (numMeshlets * NUM_MODELS + 63) / 64, 1, 1);
 	VkMemoryBarrier memBarrier{};
 	memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
 	memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 	memBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
-	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_TASK_SHADER_BIT_EXT, 0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 1, &memBarrier, 0, nullptr, 0, nullptr);
 
 	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 	
@@ -1462,10 +1306,11 @@ void ModuleVulkan::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t i
 
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-	//vkCmdDrawMeshTasksEXT(commandBuffer, numMeshlets, 1, 1);
-	//NOTE: Draw without the indirect count(uncomment the line below and comment 2 lines below)
-	//vkCmdDrawMeshTasksIndirectEXT(commandBuffer, dispatchIndirectBuffer, 0, NUM_MODELS, sizeof(uint32_t) * 3);
-	vkCmdDrawMeshTasksIndirectCountEXT(commandBuffer, dispatchIndirectBuffer, 0, parameterBuffer, (sizeof(uint32_t) + GetInbetweenAlignmentSpace(sizeof(uint32_t), minStorageBufferOffsetAlignment))*currentFrame, NUM_MODELS, sizeof(uint32_t) * 3);
+	VkDeviceSize poffsets = 0;
+	vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, &poffsets);
+	vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+	vkCmdDrawIndexedIndirect(commandBuffer, dispatchIndirectBuffer, (sizeof(VkDrawIndexedIndirectCommand) * numMeshlets + GetInbetweenAlignmentSpace(sizeof(VkDrawIndexedIndirectCommand) * numMeshlets, minStorageBufferOffsetAlignment)) * currentFrame, numMeshlets, sizeof(VkDrawIndexedIndirectCommand));
+	//TODO: try just one indirect drawcall -> drawCount = 1
 
 	vkCmdEndRenderPass(commandBuffer);
 
@@ -1686,9 +1531,26 @@ void ModuleVulkan::GenerateMeshlet(Mesh& mesh, MeshletMesh& meshletMesh) const
 	mesh.numIndices = 0;
 	mesh.numVertices = 0;
 
+	meshletMesh.meshletIndexesCount = 0;
 	meshletMesh.meshletBounds = new meshopt_Bounds[meshletMesh.meshletCount];
 	for (int i = 0; i < meshletMesh.meshletCount; ++i)
+	{
 		meshletMesh.meshletBounds[i] = meshopt_computeMeshletBounds(&meshletMesh.meshletVertices[meshletMesh.meshlets[i].vertex_offset], &meshletMesh.meshletTriangles[meshletMesh.meshlets[i].triangle_offset], meshletMesh.meshlets[i].triangle_count, reinterpret_cast<float*>(meshletMesh.mesh.vertices), meshletMesh.mesh.numVertices, sizeof(Vertex));
+		meshletMesh.meshletIndexesCount += meshletMesh.meshlets[i].triangle_count * 3;
+	}
+
+	//GenerateMeshletIndexes
+	meshletMesh.meshletIndexes = new unsigned int[meshletMesh.meshletIndexesCount];
+	unsigned int offset = 0;
+	for (int i = 0; i < meshletMesh.meshletCount; ++i)
+	{
+		const meshopt_Meshlet& meshlet = meshletMesh.meshlets[i];
+		for (int j = 0; j < meshlet.triangle_count * 3; ++j)
+		{
+			meshletMesh.meshletIndexes[offset + j] = meshletMesh.meshletVertices[meshlet.vertex_offset + meshletMesh.meshletTriangles[meshlet.triangle_offset + j]];
+		}
+		offset += meshlet.triangle_count * 3;
+	}
 }
 
 unsigned int MeshletMesh::GetMeshletsVerticeCount()
@@ -1735,6 +1597,23 @@ void AABB::Generate(const Mesh& mesh)
 	for (int i = 0; i < mesh.numVertices; ++i)
 	{
 		const glm::vec3 pos = { mesh.vertices[i].position[0], mesh.vertices[i].position[1], mesh.vertices[i].position[2] };
+		minPoint = glm::min(pos, minPoint);
+		maxPoint = glm::max(pos, maxPoint);
+	}
+}
+
+void AABB::Generate(const MeshletMesh& meshletMesh, unsigned int meshletIdx)
+{
+	assert("index bigger than the number of input meshlets" && meshletMesh.meshletCount > meshletIdx);
+	const meshopt_Meshlet& meshlet = meshletMesh.meshlets[meshletIdx];
+	const Mesh& mesh = meshletMesh.mesh;
+	const Vertex& vertex = mesh.vertices[meshletMesh.meshletVertices[meshlet.vertex_offset]];
+	minPoint = glm::vec3(vertex.position[0], vertex.position[1], vertex.position[2]);
+	maxPoint = minPoint;
+	for (int i = 0; i < meshlet.vertex_count; ++i)
+	{
+		const Vertex& v = mesh.vertices[meshletMesh.meshletVertices[meshlet.vertex_offset + i]];
+		const glm::vec3 pos = { v.position[0], v.position[1], v.position[2] };
 		minPoint = glm::min(pos, minPoint);
 		maxPoint = glm::max(pos, maxPoint);
 	}

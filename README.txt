@@ -1,19 +1,25 @@
 This is my progres on the vulkan indirect meshlet renderer
 
+Branches:
+The github repository has two branches
+The main branch compleates the exercice using instancing and a vertex shader
+The meshShader branch compleates the exercice using meshlets with mesh and task shaders
+
 Acheived:
 Base vulkan engine
 Load meshes from gltf
 Generate the mesh meshlets
-Render the mesh using mesh shaders
-Render the meshlets using task shaders
+Render the mesh using mesh and task shaders
+Render the mesh vertex shaders
+per meshlet frustum culling on a compute shader using the frustum aabb method
 Lambertian fragment shader using the normal from the meshlet
-GPU driven of 100000 meshlet meshes adding a compute shader with culling for models using the frustum aabb method
+GPU driven of 100000 meshlet meshes
 
 HOW TO USE:
 Little camera movind with WASD and the keyboard arrows
 
 ON PROGRES:
-Culling each meshlet individually on the gpu on each task shader invocation
+indirect draw with draw count = 1
 
 HOW TO COMPILE THE ENGINE:
 The engine uses cmake as a buildsystem generator + vcpkg as a package manager

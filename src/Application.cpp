@@ -2,7 +2,7 @@
 #include "Module.h"
 #include "ModuleWindow.h"
 #include "ModuleInput.h"
-#include "ModuleVulkan.h"
+#include "ModuleVulkanMeshlets.h"
 #include "ModuleEditorCamera.h"
 #include "SDL3/SDL_timer.h"
 

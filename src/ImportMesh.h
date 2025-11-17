@@ -1,7 +1,7 @@
 #ifndef __IMPORTER_MESH_H__
 #define __IMPORTER_MESH_H__
 
-#include "ModuleVulkan.h"
+#include "ModuleVulkanMeshlets.h"
 
 namespace tinygltf {
 	struct Model;

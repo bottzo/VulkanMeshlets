@@ -1,5 +1,6 @@
 {
   "dependencies": [
+    "devil",
     "meshoptimizer",
     {
       "name": "sdl3",

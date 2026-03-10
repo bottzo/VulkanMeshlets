@@ -1,11 +1,14 @@
 #version 460
 
 layout(location = 0) out vec4 outColor;
+layout(binding = 4) uniform sampler2D texture1;
 
 //input normal
 layout(location=0) in vec3 normal;
 layout(location=1) in flat uint meshletID;
 layout(location=2) in flat uint meshID;
+layout(location=3) in vec2 texCoord;
+
 //lambertian shader
 const vec3 lightDir = normalize(vec3(0.0f,1.0f, 1.0f));
 const vec3 diffuseCol = vec3(0.5f, 0.5f, 0.0f);
@@ -32,4 +35,7 @@ void main() {
     //outColor = vec4(ambientCol,1) + vec4(diffuseCol * max(dot(normalize(normal), lightDir), 0.0f), 1.0f);
     //outColor = vec4(ambientCol,1) + vec4(meshletColors[meshID%MAX_COLORS] * max(dot(normalize(normal), lightDir), 0.0f), 1.0f);
     outColor = vec4(ambientCol,1) + vec4(mix(meshletColors[meshID%MAX_COLORS], meshletColors[meshletID%MAX_COLORS], 0.3) * max(dot(normalize(normal), lightDir), 0.0f), 1.0f);
+    outColor = mix(texture(texture1, texCoord), outColor, 0.5);
+    outColor.a = 1.0f;
+    //outColor = texture(texture1, texCoord);
 }

@@ -9,6 +9,8 @@
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include "IL/il.h"
+#include "IL/ilu.h"
 
 #include <random>
 
@@ -298,13 +300,13 @@ bool ModuleVulkan::Init()
 	subpass.pColorAttachments = &colorAttachmentRef;
 	subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
-	VkSubpassDependency dependency[1]{};
-	dependency[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-	dependency[0].dstSubpass = 0;
-	dependency[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-	dependency[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-	dependency[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-	dependency[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	//VkSubpassDependency dependency[1]{};
+	//dependency[0].srcSubpass = 0;
+	//dependency[0].dstSubpass = VK_SUBPASS_EXTERNAL;
+	//dependency[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+	//dependency[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	//dependency[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+	//dependency[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
 	VkRenderPassCreateInfo renderPassInfo{};
 	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -312,8 +314,8 @@ bool ModuleVulkan::Init()
 	renderPassInfo.pAttachments = attachments;
 	renderPassInfo.subpassCount = 1;
 	renderPassInfo.pSubpasses = &subpass;
-	renderPassInfo.dependencyCount = sizeof(dependency) / sizeof(VkSubpassDependency);
-	renderPassInfo.pDependencies = dependency;
+	renderPassInfo.dependencyCount = 0;//sizeof(dependency) / sizeof(VkSubpassDependency);
+	renderPassInfo.pDependencies = nullptr;//dependency;
 
 	if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
 		LOG("Error creating the renderpass object");
@@ -360,7 +362,7 @@ bool ModuleVulkan::Init()
 	shaderStagesInfo[1].module = fragmentModule;
 	shaderStagesInfo[1].pName = "main";
 
-	VkVertexInputAttributeDescription vInputAttributeDescription[2]{};
+	VkVertexInputAttributeDescription vInputAttributeDescription[3]{};
 	vInputAttributeDescription[0].binding = 0;
 	vInputAttributeDescription[0].format = VK_FORMAT_R32G32B32_SFLOAT;
 	vInputAttributeDescription[0].location = 0;
@@ -369,6 +371,10 @@ bool ModuleVulkan::Init()
 	vInputAttributeDescription[1].format = VK_FORMAT_R32G32B32_SFLOAT;
 	vInputAttributeDescription[1].location = 1;
 	vInputAttributeDescription[1].offset = sizeof(float) * 3;
+	vInputAttributeDescription[2].binding = 0;
+	vInputAttributeDescription[2].format = VK_FORMAT_R32G32_SFLOAT;
+	vInputAttributeDescription[2].location = 2;
+	vInputAttributeDescription[2].offset = sizeof(float) * 6;
 	VkVertexInputBindingDescription vInputBindingDescription{};
 	vInputBindingDescription.binding = 0;
 	vInputBindingDescription.stride = sizeof(Vertex);
@@ -397,6 +403,7 @@ bool ModuleVulkan::Init()
 	viewport.y = 0.0f;
 	viewport.width = (float)swapChainExtent.width;
 	viewport.height = (float)swapChainExtent.height;
+
 	viewport.minDepth = 0.0f;
 	viewport.maxDepth = 1.0f;
 
@@ -465,7 +472,7 @@ bool ModuleVulkan::Init()
 	depthStencil.front = {}; // Optional
 	depthStencil.back = {}; // Optional
 
-	VkDescriptorSetLayoutBinding layoutBindings[4]{};
+	VkDescriptorSetLayoutBinding layoutBindings[5]{};
 	layoutBindings[0].binding = 0;
 	layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	layoutBindings[0].descriptorCount = 1;
@@ -490,6 +497,12 @@ bool ModuleVulkan::Init()
 	layoutBindings[3].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	layoutBindings[3].pImmutableSamplers = nullptr; // Optional
 
+	layoutBindings[4].binding = 4;
+	layoutBindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	layoutBindings[4].descriptorCount = 1;
+	layoutBindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	layoutBindings[4].pImmutableSamplers = nullptr;
+	
 	VkDescriptorSetLayoutCreateInfo layoutInfo{};
 	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 	layoutInfo.bindingCount = sizeof(layoutBindings) / sizeof(VkDescriptorSetLayoutBinding);
@@ -747,6 +760,146 @@ bool ModuleVulkan::Init()
 		LOG("Error creating the device buffers");
 		return false;
 	}
+	
+	VkSampler sampler;
+	VkSamplerCreateInfo samplerCreateInfo{};
+	samplerCreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
+	samplerCreateInfo.minFilter = VK_FILTER_LINEAR;
+	samplerCreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	samplerCreateInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	samplerCreateInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	samplerCreateInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	samplerCreateInfo.anisotropyEnable = false; //Check a device feature to see if it is available
+	vkCreateSampler(device, &samplerCreateInfo, nullptr, &sampler);
+
+	//Create image and sampler
+	ilInit();
+	iluInit();
+	ILuint ilImg;
+	ilGenImages(1, &ilImg);
+	ilBindImage(ilImg);
+	const char* imgPath = "assets/Duck/DuckCM.png";
+	if (!ilLoadImage(imgPath))
+	{
+		LOG("Error loading the image %s", imgPath);
+		for (ILenum lastError = ilGetError(); lastError != IL_NO_ERROR; lastError = ilGetError())
+		{
+			LOG("Devil reported error: %s", iluErrorString(lastError));
+		}
+		return false;
+	}
+
+	//ImportOptions - requiere ILU
+	//iluFlipImage();
+	auto IlToVulkan = [](ILint format, ILint type) -> VkFormat {
+		switch (format)
+		{
+		case IL_RGB:
+			switch (type)
+			{
+			case IL_UNSIGNED_BYTE:
+				return VK_FORMAT_R8G8B8_UNORM;
+			case IL_BYTE:
+				return VK_FORMAT_R8G8B8_SNORM;
+			case IL_UNSIGNED_SHORT:
+				return VK_FORMAT_R16G16B16_UNORM;
+			case IL_SHORT:
+				return VK_FORMAT_R16G16B16_SNORM;
+			case IL_HALF:
+				VK_FORMAT_R16G16B16_SFLOAT;
+			case IL_INT:
+				return VK_FORMAT_R32G32B32_SINT;
+			case IL_UNSIGNED_INT:
+				return VK_FORMAT_R32G32B32_UINT;
+			case IL_FLOAT:
+				return VK_FORMAT_R32G32B32_SFLOAT;
+			case IL_DOUBLE:
+				return VK_FORMAT_R64G64B64_SFLOAT;
+			}
+		case IL_RGBA:
+			switch (type)
+			{
+			case IL_UNSIGNED_BYTE:
+				return VK_FORMAT_R8G8B8A8_UNORM;
+			case IL_BYTE:
+				return VK_FORMAT_R8G8B8A8_SNORM;
+			case IL_UNSIGNED_SHORT:
+				return VK_FORMAT_R16G16B16A16_UNORM;
+			case IL_SHORT:
+				return VK_FORMAT_R16G16B16A16_SNORM;
+			case IL_HALF:
+				VK_FORMAT_R16G16B16A16_SFLOAT;
+			case IL_INT:
+				return VK_FORMAT_R32G32B32A32_SINT;
+			case IL_UNSIGNED_INT:
+				return VK_FORMAT_R32G32B32A32_UINT;
+			case IL_FLOAT:
+				return VK_FORMAT_R32G32B32A32_SFLOAT;
+			case IL_DOUBLE:
+				return VK_FORMAT_R64G64B64A64_SFLOAT;
+			}
+		case IL_BGRA:
+			switch (type)
+			{
+			case IL_UNSIGNED_BYTE:
+				return VK_FORMAT_B8G8R8A8_UNORM;
+			case IL_BYTE:
+				return VK_FORMAT_B8G8R8A8_SNORM;
+			default:
+				LOG("Error: unknown BGRA IL type to transform to vulkan format");
+				return VK_FORMAT_UNDEFINED;
+			}
+		case IL_BGR:
+			switch (type)
+			{
+			case IL_UNSIGNED_BYTE:
+				return VK_FORMAT_B8G8R8_UNORM;
+			case IL_BYTE:
+				return VK_FORMAT_B8G8R8_SNORM;
+			default:
+				LOG("Error: unknown BGR IL type to transform to vulkan format");
+				return VK_FORMAT_UNDEFINED;
+			}
+		default:
+			LOG("Error: unknown IL format to transform to vulkan format");
+			return VK_FORMAT_UNDEFINED;
+		}
+	};
+	ILint ilFormat = ilGetInteger(IL_IMAGE_FORMAT);
+	const ILint ilType = ilGetInteger(IL_IMAGE_TYPE);
+	if (ilFormat == IL_COLOR_INDEX)
+	{
+		ilConvertImage(IL_RGBA, ilType);
+		ilFormat = IL_RGBA;
+	}
+
+	const VkFormat imgFormat = IlToVulkan(ilFormat, ilType);
+	const ILint imgWidth = ilGetInteger(IL_IMAGE_WIDTH);
+	const ILint imgHeight = ilGetInteger(IL_IMAGE_HEIGHT);
+	const ILint imgDataSize = ilGetInteger(IL_IMAGE_SIZE_OF_DATA);
+	CreateImage(imgWidth, imgHeight, imgFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, checkersImg, checkersImgMemory);
+	VkImageViewCreateInfo checkersImgViewCreateInfo{};
+	checkersImgViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	checkersImgViewCreateInfo.image = checkersImg;
+	checkersImgViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	checkersImgViewCreateInfo.format = imgFormat;
+	checkersImgViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	checkersImgViewCreateInfo.subresourceRange.baseMipLevel = 0;
+	checkersImgViewCreateInfo.subresourceRange.levelCount = ilGetInteger(IL_NUM_MIPMAPS) + 1;
+	checkersImgViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+	checkersImgViewCreateInfo.subresourceRange.layerCount = ilGetInteger(IL_NUM_LAYERS) + 1;
+	vkCreateImageView(device, &checkersImgViewCreateInfo, nullptr, &checkersImgView);
+
+	VkBuffer checkersImgBuffer;
+	VkDeviceMemory checkersImgBufferMemory;
+	void* checkersImgBufferMemoryPtr = nullptr;
+	CreateBuffer(imgDataSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, checkersImgBuffer, checkersImgBufferMemory);
+	vkMapMemory(device, checkersImgBufferMemory, 0, imgDataSize, 0, &checkersImgBufferMemoryPtr);
+	memcpy(checkersImgBufferMemoryPtr, ilGetData(), imgDataSize);
+	vkUnmapMemory(device, checkersImgBufferMemory);
+	ilDeleteImages(1, &ilImg);
+	ilShutDown();
 
 	VkCommandPool tmpCommandPool;
 	VkCommandPoolCreateInfo tmpCommandPoolInfo{};
@@ -791,6 +944,35 @@ bool ModuleVulkan::Init()
 	bufferCopyRegion.srcOffset = offset;
 	bufferCopyRegion.size = meshletMesh.meshletIndexesCount * sizeof(unsigned int);
 	vkCmdCopyBuffer(tmpCmdBuffer, stagingBuffer, indexBuffer, 1, &bufferCopyRegion);
+	VkImageMemoryBarrier imgBarrier{};
+	imgBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	imgBarrier.image = checkersImg;
+	imgBarrier.srcAccessMask = 0;
+	imgBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	imgBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	imgBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	imgBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	imgBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	imgBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	imgBarrier.subresourceRange.levelCount = 1;
+	imgBarrier.subresourceRange.layerCount = 1;
+	vkCmdPipelineBarrier(tmpCmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imgBarrier);
+	VkBufferImageCopy region{};
+	region.bufferOffset = 0;
+	region.bufferRowLength = 0;
+	region.bufferImageHeight = 0;
+	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.imageSubresource.mipLevel = 0;
+	region.imageSubresource.baseArrayLayer = 0;
+	region.imageSubresource.layerCount = 1;
+	region.imageOffset = { 0, 0, 0 };
+	region.imageExtent = {static_cast<const unsigned int>(imgWidth), static_cast<const unsigned int>(imgHeight), 1};
+	vkCmdCopyBufferToImage(tmpCmdBuffer, checkersImgBuffer, checkersImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+	imgBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	imgBarrier.dstAccessMask = 0;
+	imgBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	imgBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	vkCmdPipelineBarrier(tmpCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &imgBarrier);
 
 	vkEndCommandBuffer(tmpCmdBuffer);
 	VkSubmitInfo submitInfo{};
@@ -803,19 +985,23 @@ bool ModuleVulkan::Init()
 	vkDestroyCommandPool(device, tmpCommandPool, nullptr);
 	vkFreeMemory(device, stagingBufferMemory, nullptr);
 	vkDestroyBuffer(device, stagingBuffer, nullptr);
+	vkDestroyBuffer(device, checkersImgBuffer, nullptr);
+	vkFreeMemory(device, checkersImgBufferMemory, nullptr);
 
 
-	VkDescriptorPoolSize poolSize[4]{};
+	VkDescriptorPoolSize poolSize[5]{};
 	//graphics descriptors
 	poolSize[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	poolSize[0].descriptorCount = 2 * MAX_FRAMES_IN_FLIGHT;
 	poolSize[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	poolSize[1].descriptorCount = 2 * MAX_FRAMES_IN_FLIGHT;
-	//cull descriptors
-	poolSize[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	poolSize[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	poolSize[2].descriptorCount = 1 * MAX_FRAMES_IN_FLIGHT;
-	poolSize[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	poolSize[3].descriptorCount = 4 * MAX_FRAMES_IN_FLIGHT;
+	//cull descriptors
+	poolSize[3].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	poolSize[3].descriptorCount = 1 * MAX_FRAMES_IN_FLIGHT;
+	poolSize[4].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	poolSize[4].descriptorCount = 4 * MAX_FRAMES_IN_FLIGHT;
 	VkDescriptorPoolCreateInfo dPoolInfo{};
 	dPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 	dPoolInfo.poolSizeCount = sizeof(poolSize) / sizeof(VkDescriptorPoolSize);
@@ -862,7 +1048,12 @@ bool ModuleVulkan::Init()
 		ssBufferInfo[1].offset = 0;
 		ssBufferInfo[1].range = VK_WHOLE_SIZE;
 
-		VkWriteDescriptorSet descriptorWrite[2]{};
+		VkDescriptorImageInfo imgInfo{};
+		imgInfo.sampler = sampler;
+		imgInfo.imageView = checkersImgView;
+		imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		VkWriteDescriptorSet descriptorWrite[3]{};
 		descriptorWrite[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		descriptorWrite[0].dstSet = descriptorSets[i];
 		descriptorWrite[0].dstBinding = 0;
@@ -882,6 +1073,16 @@ bool ModuleVulkan::Init()
 		descriptorWrite[1].pBufferInfo = ssBufferInfo;
 		descriptorWrite[1].pImageInfo = nullptr; // Optional
 		descriptorWrite[1].pTexelBufferView = nullptr; // Optional
+
+		descriptorWrite[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descriptorWrite[2].dstSet = descriptorSets[i];
+		descriptorWrite[2].dstBinding = 4;
+		descriptorWrite[2].dstArrayElement = 0;
+		descriptorWrite[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		descriptorWrite[2].descriptorCount = 1;
+		descriptorWrite[2].pImageInfo = &imgInfo;
+		descriptorWrite[2].pBufferInfo = nullptr;
+		descriptorWrite[2].pTexelBufferView = nullptr;
 
 		vkUpdateDescriptorSets(device, sizeof(descriptorWrite) / sizeof(VkWriteDescriptorSet), descriptorWrite, 0, nullptr);
 	}
@@ -1007,8 +1208,9 @@ UpdateStatus ModuleVulkan::PostUpdate(float dt)
 		memcpy(static_cast<VkDrawIndexedIndirectCommand*>(dispatchIndirectBufferPtr[currentFrame]) + i, &command, sizeof(command));
 		meshletOffset += meshlet.triangle_count * 3;
 	}
-	VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &swapChainImageIndex);
-	if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+	const VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &swapChainImageIndex);
+	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+		//TODO: revisar el check de error out of date i suboptimal para el resize. Mejor detectar el resize desde la api de la plataforma con las windows
 		//check window minimized (TODO): handle it :)
 		VkSurfaceCapabilitiesKHR capabilities;
 		vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);
@@ -1417,13 +1619,13 @@ bool ModuleVulkan::CheckDeviceExtensionSupport(VkPhysicalDevice device, const ch
 	return found;
 }
 
-uint32_t ModuleVulkan::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
+uint32_t ModuleVulkan::FindMemoryType(uint32_t typeIndexBitmask, VkMemoryPropertyFlags properties)
 {
 	VkPhysicalDeviceMemoryProperties memProperties;
 	vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
 
 	for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++)
-		if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
+		if ((typeIndexBitmask & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
 			return i;
 
 	LOG("Failed to find suitable memory type!");
@@ -1621,7 +1823,6 @@ void AABB::Generate(const MeshletMesh& meshletMesh, unsigned int meshletIdx)
 
 void AABB::GetPoints(glm::vec3(&points)[8]) const
 {
-
 	points[0] = maxPoint;
 	points[1] = glm::vec3(maxPoint.x, minPoint.y, maxPoint.z);
 	points[2] = glm::vec3(maxPoint.x, minPoint.y, minPoint.z);

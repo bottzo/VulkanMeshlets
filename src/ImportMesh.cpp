@@ -34,6 +34,7 @@ bool ImporterMesh::Import(const tinygltf::Model& model, const tinygltf::Primitiv
 {
 	const auto& itPos = primitive.attributes.find("POSITION");
 	const auto& itNorm = primitive.attributes.find("NORMAL");
+	const auto& itTexCoord = primitive.attributes.find("TEXCOORD_0");
 
 	if (itPos == primitive.attributes.end())
 	{
@@ -45,6 +46,11 @@ bool ImporterMesh::Import(const tinygltf::Model& model, const tinygltf::Primitiv
 		LOG("Error: The imported mesh does not have normals");
 		return false;
 	}
+	if (itTexCoord == primitive.attributes.end())
+	{
+		LOG("Error: The imported mesh does not have vertex texture coordinates");
+		return false;
+	}
 	if (primitive.indices == -1)
 	{
 		LOG("Error: The imported mesh does not have indices");
@@ -53,6 +59,7 @@ bool ImporterMesh::Import(const tinygltf::Model& model, const tinygltf::Primitiv
 
 	const tinygltf::Accessor& posAcc = model.accessors[itPos->second];
 	const tinygltf::Accessor& normAcc = model.accessors[itNorm->second];
+	const tinygltf::Accessor& texCoordAcc = model.accessors[itTexCoord->second];
 
 	assert(posAcc.type == TINYGLTF_TYPE_VEC3);
 	assert(posAcc.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT);
@@ -64,8 +71,13 @@ bool ImporterMesh::Import(const tinygltf::Model& model, const tinygltf::Primitiv
 	const tinygltf::BufferView& normView = model.bufferViews[normAcc.bufferView];
 	const tinygltf::Buffer& normBuffer = model.buffers[normView.buffer];
 	const float* bufferNorm = reinterpret_cast<const float*>(&normBuffer.data[normView.byteOffset + normAcc.byteOffset]);
+	assert(texCoordAcc.type == TINYGLTF_TYPE_VEC2);
+	assert(texCoordAcc.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT);
+	const tinygltf::BufferView& texCoordView = model.bufferViews[texCoordAcc.bufferView];
+	const tinygltf::Buffer& texCoordBuffer = model.buffers[texCoordView.buffer];
+	const float* bufferTexCoord = reinterpret_cast<const float*>(&texCoordBuffer.data[texCoordView.byteOffset + texCoordAcc.byteOffset]);
 
-	assert(posAcc.count == normAcc.count, "Error importing the mesh, the mesh does not have the same number of position and normal attributes");
+	assert(posAcc.count == normAcc.count && "Error importing the mesh, the mesh does not have the same number of position, normal and texture coordinate attributes");
 	mesh.numVertices = posAcc.count;
 	LOG("NumVertices: %u", mesh.numVertices);
 	mesh.vertices = new Vertex[mesh.numVertices];
@@ -78,10 +90,12 @@ bool ImporterMesh::Import(const tinygltf::Model& model, const tinygltf::Primitiv
 		vertex.position[0] = bufferPos[0];
 		vertex.position[1] = bufferPos[1];
 		vertex.position[2] = bufferPos[2];
-		if (posView.byteStride != 0) {
+		if (posView.byteStride != 0) 
+		{
 			bufferPos = reinterpret_cast<const float*>(reinterpret_cast<const char*>(bufferPos) + posView.byteStride);
 		}
-		else {
+		else 
+		{
 			bufferPos += 3;
 		}
 
@@ -96,6 +110,18 @@ bool ImporterMesh::Import(const tinygltf::Model& model, const tinygltf::Primitiv
 		else
 		{
 			bufferNorm += 3;
+		}
+
+		//texCoord
+		vertex.texCoord[0] = bufferTexCoord[0];
+		vertex.texCoord[1] = bufferTexCoord[1];
+		if (texCoordView.byteStride != 0)
+		{
+			bufferTexCoord = reinterpret_cast<const float*>(reinterpret_cast<const char*>(bufferTexCoord) + texCoordView.byteStride);
+		}
+		else
+		{
+			bufferTexCoord += 2;
 		}
 	}
 

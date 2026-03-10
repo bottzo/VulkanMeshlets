@@ -2,7 +2,7 @@
 #include "SDL3/SDL_init.h"
 #include "SDL3/SDL_video.h"
 
-ModuleWindow::ModuleWindow() : window(nullptr), width(700), heigth(700)
+ModuleWindow::ModuleWindow() : window(nullptr), width(1080), heigth(720)
 {
 
 }

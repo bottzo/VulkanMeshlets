@@ -14,6 +14,7 @@ struct Vertex
 {
 	float position[3];
 	float normal[3];
+	float texCoord[2];
 };
 
 struct Mesh
@@ -146,6 +147,9 @@ private:
 	VkBuffer OBBsBuffer;
 	VkDeviceMemory OBBsBufferMemory;
 	void* OBBsBufferPtr[MAX_FRAMES_IN_FLIGHT];
+	VkImage checkersImg;
+	VkDeviceMemory checkersImgMemory;
+	VkImageView checkersImgView;
 
 	PFN_vkCmdDrawMeshTasksEXT vkCmdDrawMeshTasksEXT = nullptr;
 	PFN_vkCmdDrawMeshTasksIndirectEXT vkCmdDrawMeshTasksIndirectEXT = nullptr;

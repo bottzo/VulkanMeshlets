@@ -2,6 +2,7 @@
 
 layout(location = 0) in vec3 pos;
 layout(location = 1) in vec3 norm;
+layout(location = 2) in vec2 texCoord;
 
 
 layout(binding = 0) uniform uboData 
@@ -23,6 +24,7 @@ layout(std430, binding = 3) readonly buffer ModelIDs { uint modelIDs[]; };
 layout(location=0) out vec3 normal;
 layout(location=1) out flat uint meshletID;
 layout(location=2) out flat uint meshID;
+layout(location=3) out vec2 textureCoordinates;
 
 //meshletID -> gl_DrawID
 //currentProcessingMeshlet -> gl_InstanceIndex
@@ -34,6 +36,7 @@ void main()
 	const mat4 model = models[modelID];
 	gl_Position = viewProj * model * vec4(pos, 1);
 	normal = transpose(inverse(mat3(model))) * norm;
+	textureCoordinates = texCoord;
 	meshletID = gl_DrawID;
 	meshID = modelID;	
 }

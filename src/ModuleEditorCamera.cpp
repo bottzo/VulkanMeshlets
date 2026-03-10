@@ -69,8 +69,8 @@ void Camera::SetPerspective(float fovy, float aspectRatio, float near, float far
 {
 	nearPlane = near;
 	farPlane = far; this->fovy = fovy;
-	fovx = 2.0f * glm::atan(glm::tan(fovy * 0.5f) / aspectRatio);
-	proj = glm::perspective(fovy, aspectRatio, near, far);
+	fovx = 2.0f * glm::atan(glm::tan(fovy * 0.5f) * aspectRatio);
+	//proj = glm::perspective(fovy, aspectRatio, near, far);
 	////Edits to perspective matrix for vulkan: the projection matrix does not need a -1 because it does not need to flip the z to arrive al clip coordinates
 	////vulkan perspective matrix is right handed but aplying a 180 degree rotation on the X axis
 	//proj[2][3] = 1.0f;// this glm rotate function does not influence the last row so we manually set the -1
@@ -85,7 +85,7 @@ void Camera::SetPerspective(float fovy, float aspectRatio, float near, float far
 	const float halfFovTangent = glm::tan(fovy * 0.5f);
 	glm::mat4 perspectiveProj
 	{
-		(1.0f / aspectRatio) / halfFovTangent, 0.0f, 0.0f, 0.0f,
+		1.0f / (halfFovTangent * aspectRatio), 0.0f, 0.0f, 0.0f,
 		0.0f, 1.0f / halfFovTangent, 0.0f, 0.0f,
 		0.0f, 0.0f, far / (far - near), 1.0f,
 		0.0f, 0.0f, -(near * far) / (far - near), 0.0f
@@ -111,13 +111,13 @@ void Camera::Translate(const glm::vec3& newVector)
 
 glm::vec4 Camera::NearPlane() const
 {
-	const glm::vec3 foward = GetFoward();
-	return glm::vec4(-foward, glm::dot(pos + foward * nearPlane, -foward));
+	const glm::vec3 foward = -GetFoward();
+	return glm::vec4(foward, glm::dot(pos + foward * nearPlane, foward));
 }
 
 glm::vec4 Camera::FarPlane() const
 {
-	const glm::vec3 foward = GetFoward();
+	const glm::vec3 foward = -GetFoward();
 	return glm::vec4(foward, glm::dot(pos + foward * farPlane, foward));
 }
 
@@ -126,8 +126,8 @@ glm::vec4 Camera::LeftPlane() const
 	//glm::vec3 left = glm::cross(GetUp(), GetFoward());
 	glm::vec3 left = -GetRight();
 	//glm::normalize(left) * glm::tan(fovy * 0.5f);
-	left *= glm::tan(fovy * 0.5f);
-	const glm::vec3 leftSide = GetFoward() + left;
+	left *= glm::tan(fovx * 0.5f);
+	const glm::vec3 leftSide = -GetFoward() + left;
 	const glm::vec3 leftSideNormal = glm::normalize(glm::cross(GetUp(), leftSide));
 	return glm::vec4(leftSideNormal, glm::dot(pos, leftSideNormal));
 }
@@ -136,22 +136,22 @@ glm::vec4 Camera::RightPlane() const
 {
 	glm::vec3 right = GetRight();
 	//glm::normalize(right) * glm::tan(fovy * 0.5f);
-	right *= glm::tan(fovy * 0.5f);
-	const glm::vec3 rightSide = GetFoward() + right;
+	right *= glm::tan(fovx * 0.5f);
+	const glm::vec3 rightSide = -GetFoward() + right;
 	const glm::vec3 rightSideNormal = glm::normalize(glm::cross(rightSide, GetUp()));
 	return glm::vec4(rightSideNormal, glm::dot(pos, rightSideNormal));
 }
 
 glm::vec4 Camera::TopPlane() const
 {
-	const glm::vec3 topSide = GetFoward() + glm::tan(fovx * 0.5f) * GetUp();
+	const glm::vec3 topSide = -GetFoward() + glm::tan(fovy * 0.5f) * GetUp();
 	const glm::vec3 topSideNormal = glm::normalize(glm::cross(GetRight(), topSide));
 	return glm::vec4(topSideNormal, glm::dot(pos, topSideNormal));
 }
 
 glm::vec4 Camera::BottomPlane() const
 {
-	const glm::vec3 bottomSide = GetFoward() - glm::tan(fovx * 0.5f) * GetUp();
+	const glm::vec3 bottomSide = -GetFoward() - glm::tan(fovy * 0.5f) * GetUp();
 	//float3 left = glm::cross(GetUp(), GetFoward());
 	const glm::vec3 bottomSideNormal = glm::normalize(glm::cross(-GetRight(), bottomSide));
 	return glm::vec4(bottomSideNormal, glm::dot(pos, bottomSideNormal));

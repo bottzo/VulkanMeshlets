@@ -1164,7 +1164,7 @@ UpdateStatus ModuleVulkan::PostUpdate(float dt)
 	const uint32_t numModels = NUM_MODELS;
 	memcpy(static_cast<float*>(frustumPlanesBufferPtr[currentFrame]) + 6 * 4, &numModels, sizeof(numModels));
 	VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &swapChainImageIndex);
-	if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
 		//check window minimized (TODO): handle it :)
 		VkSurfaceCapabilitiesKHR capabilities;
 		vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &capabilities);

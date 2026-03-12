@@ -1177,10 +1177,19 @@ UpdateStatus ModuleVulkan::PostUpdate(float dt)
 			CreateFrameBuffers();
 			mCamera->ChangeAspectRatio(static_cast<float>(capabilities.currentExtent.width) / static_cast<float>(capabilities.currentExtent.height));
 		}
+		//TODO: timeline samaphore
+		//If the error is with the suboptimal, the aquire didn't really fail, so the binary semaphore is signaled but useless: must recreate or use timeline semaphores
+		if (result == VK_SUBOPTIMAL_KHR)
+		{
+			vkDestroySemaphore(device, imageAvailableSemaphores[currentFrame], nullptr);
+			VkSemaphoreCreateInfo sInfo{};
+			sInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+			vkCreateSemaphore(device, &sInfo, nullptr, &imageAvailableSemaphores[currentFrame]);
+		}
 		return UpdateStatus::UPDATE_CONTINUE;
 	}
 	//Reset the fence just if we know that we are going to submit work
-	else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+	else if (result != VK_SUCCESS) {
 		LOG("Runtime error aquiring the next image to present");
 		return UpdateStatus::UPDATE_ERROR;
 	}
